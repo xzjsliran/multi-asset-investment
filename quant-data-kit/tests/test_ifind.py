@@ -1,4 +1,6 @@
 import json
+from contextlib import redirect_stdout
+import io
 import os
 from pathlib import Path
 import sys
@@ -12,6 +14,16 @@ from quantkit.credentials import save_credential, get_credential, status
 
 
 class OptionalIfind(unittest.TestCase):
+    def test_optional_tushare_without_token_keeps_status_machine_readable(self):
+        def absent_token():
+            print('请设置tushare pro的token凭证码')
+            return None
+        with tempfile.TemporaryDirectory() as temp, patch('pathlib.Path.home',return_value=Path(temp)), patch.dict(os.environ,{},clear=True), patch('tushare.get_token',side_effect=absent_token):
+            output=io.StringIO()
+            with redirect_stdout(output):
+                print(json.dumps(status()))
+            self.assertFalse(json.loads(output.getvalue())['tushare']['configured'])
+
     def test_local_credentials_permission_and_redacted_status(self):
         with tempfile.TemporaryDirectory() as temp, patch('pathlib.Path.home',return_value=Path(temp)), patch.dict(os.environ,{},clear=True):
             save_credential('ifind','unit-test-only-secret')

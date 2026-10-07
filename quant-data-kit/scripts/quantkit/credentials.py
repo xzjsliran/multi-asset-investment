@@ -1,5 +1,7 @@
 """私有凭证留在用户配置目录；项目只读取是否可用，不导出凭证。"""
 import getpass
+from contextlib import redirect_stdout
+import io
 import json
 import os
 from pathlib import Path
@@ -33,7 +35,9 @@ def get_credential(provider):
     if provider == "tushare":
         try:
             import tushare as ts
-            return ts.get_token() or ""
+            # SDK 在无凭证时会向 stdout 打印提示，避免混入 CLI 的 JSON 输出。
+            with redirect_stdout(io.StringIO()):
+                return ts.get_token() or ""
         except Exception:
             pass
     return ""
