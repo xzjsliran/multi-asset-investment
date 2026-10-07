@@ -1,0 +1,136 @@
+{
+  "id": "investment_backtest_v2",
+  "version": "2.1",
+  "audience": "commercial_client",
+  "document_type": "investment_backtest",
+  "metadata_fields": [
+    "document_type",
+    "version",
+    "report_date",
+    "report_id",
+    "issuer",
+    "author",
+    "reviewer",
+    "distribution",
+    "conflicts_disclosure"
+  ],
+  "sections": [
+    {
+      "id": "summary",
+      "title": "研究摘要",
+      "required": true,
+      "source": [
+        "facts",
+        "commentary"
+      ]
+    },
+    {
+      "id": "mandate",
+      "title": "策略概况与回测设定",
+      "required": true,
+      "source": [
+        "overview",
+        "assumptions",
+        "execution_notes"
+      ]
+    },
+    {
+      "id": "performance",
+      "title": "绩效与风险分析",
+      "required": true,
+      "source": [
+        "strategies.metrics",
+        "curves",
+        "annual",
+        "monthly"
+      ]
+    },
+    {
+      "id": "comparison",
+      "title": "策略比较分析",
+      "required": false,
+      "condition": "strategies.length > 1",
+      "source": [
+        "pairs",
+        "facts",
+        "commentary"
+      ]
+    },
+    {
+      "id": "portfolio",
+      "title": "资产配置与贡献分析",
+      "required": true,
+      "source": [
+        "strategies.detail"
+      ]
+    },
+    {
+      "id": "disclosures",
+      "title": "研究局限与风险提示",
+      "required": true,
+      "source": [
+        "disclosures",
+        "scope_notes"
+      ]
+    },
+    {
+      "id": "appendix",
+      "title": "附录：指标定义与完整区间",
+      "required": true,
+      "source": [
+        "methods",
+        "strategies.original_metrics"
+      ]
+    }
+  ],
+  "headings": {
+    "summary": "研究摘要",
+    "mandate": "策略概况与回测设定",
+    "overview": "策略配置概要",
+    "assumptions": "回测参数与统计口径",
+    "performance": "绩效与风险分析",
+    "metrics": "主要绩效指标",
+    "nav": "累计净值走势",
+    "drawdown": "回撤走势",
+    "annual": "年度收益",
+    "monthly": "月度收益",
+    "comparison": "策略比较分析",
+    "differences": "配置差异",
+    "portfolio": "资产配置与贡献分析",
+    "contribution": "资产组合收益贡献",
+    "weights": "资产配置权重",
+    "holdings": "期末持仓",
+    "disclosures": "研究局限与风险提示",
+    "appendix": "附录：指标定义与完整区间",
+    "original": "原始完整区间绩效",
+    "risk_contribution": "资产组合风险贡献"
+  },
+  "commentary_sections": [
+    "summary",
+    "comparison",
+    "portfolio"
+  ],
+  "naming": {
+    "title_example": "资产配置策略对比",
+    "strategy_example": "多资产配置策略（QDII权益）",
+    "headings": "研究主题或有数据支持的分析结论；不用设问、读图指令和内部代称"
+  },
+  "evidence": {
+    "numbers": "引用本次facts或可定位的回测记录；百分数差异使用百分点",
+    "causality": "横向比较不归因于单一规则；受控对照说明相同项和改变项",
+    "unknown": "不补造作者资质、机构审核、数据历史版本、样本外检验、实盘业绩或未来收益",
+    "risk_contribution": "实际波动贡献按共同区间逐日盈亏重算，区别于收益贡献、持仓比例及代理协方差下的目标风险估计。负风险贡献不表示空头。"
+  },
+  "disclosures": [
+    "历史模拟性质",
+    "数据来源与信息时点",
+    "成交及成本设定",
+    "全部资产只做多、持仓非负及现金不透支；仅净值输入不能验证持仓方向",
+    "共同区间与基准口径",
+    "样本及模型局限",
+    "持仓时点",
+    "出具机构提供的利益冲突披露"
+  ],
+  "regulatory_scope": "中国内地投资策略历史回测研究的内容规范。正式证券研究报告或基金销售材料应按出具机构、服务性质和分发渠道补充适用要求。模板检查不构成监管合规认证。",
+  "position_policy": "long_only"
+}

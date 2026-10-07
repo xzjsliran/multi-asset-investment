@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "quotes.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "quotes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "price": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "available_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "price_basis": {
+            "const": "raw"
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "buy_lot": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "sell_lot": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "tradable": {
+            "type": "boolean"
+          },
+          "execution_session": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "实际外币证券需填写已核实的拟执行当地交易日期"
+          }
+        },
+        "required": [
+          "code",
+          "price",
+          "currency",
+          "available_at",
+          "price_basis",
+          "source",
+          "buy_lot",
+          "sell_lot",
+          "tradable"
+        ]
+      }
+    },
+    "fx": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "rate_to_cny": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "available_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "currency",
+          "rate_to_cny",
+          "available_at"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "quotes"
+  ]
+}

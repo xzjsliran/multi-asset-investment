@@ -1,0 +1,8 @@
+# 已在教师机验证的直接依赖；Python 3.11 或 3.12。
+akshare==1.18.97
+tushare==1.4.29
+pandas==2.3.3
+numpy==2.2.6
+requests==2.34.0
+beautifulsoup4>=4.12,<5
+tzdata>=2025.2

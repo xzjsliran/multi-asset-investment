@@ -1,0 +1,4 @@
+-r quant-data-kit/requirements.txt
+-r quant-strategy-kit/requirements.txt
+-r quant-report-kit/requirements.txt
+-r quant-rebalance-kit/requirements.txt

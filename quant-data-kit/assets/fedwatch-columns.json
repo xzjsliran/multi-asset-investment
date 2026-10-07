@@ -1,0 +1,13 @@
+{
+  "description": "这是字段说明，实际概率由使用者从 CME FedWatch 下载后整理；未附带历史行情。",
+  "columns": {
+    "observation_at": "观察时点，ISO 8601 且带时区；若原始文件只有日期，使用纽约次日零点并在 provenance_note 说明",
+    "meeting_date": "该概率针对的 FOMC 会议日期，YYYY-MM-DD",
+    "target_lower": "目标区间下限，单位百分数，例如 4.25 表示 4.25%",
+    "target_upper": "目标区间上限，单位百分数",
+    "probability": "该目标区间的概率，范围 0 至 1；同一观察时点、同一会议各档概率合计 1",
+    "current_target_upper": "观察当时已实施的政策利率上限，单位百分数",
+    "source_url": "CME 原始页面或下载地址",
+    "provenance_note": "文件出处、下载时间、观察时间是否为保守估计"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "EXAMPLE_CN": {
+    "currency": "CNY",
+    "buy_lot": 100,
+    "sell_lot": 100
+  },
+  "EXAMPLE_US": {
+    "currency": "USD",
+    "buy_lot": 1,
+    "sell_lot": 1,
+    "execution_session": null
+  }
+}

@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "name": "多资产配置策略（QDII权益）",
+  "start": "2025-01-01",
+  "end": "2025-12-31",
+  "base_currency": "CNY",
+  "initial_capital": 1000000,
+  "cost_rate": 0,
+  "allocation_rebalance": "quarterly",
+  "max_valuation_gap": 10,
+  "benchmark": {
+    "code": "510300.SH",
+    "name": "沪深300ETF",
+    "kind": "etf"
+  },
+  "macro": {
+    "enabled": false
+  },
+  "long_gap_policy": "carry_and_flag",
+  "sleeves": [
+    {
+      "id": "bond",
+      "name": "美元短债",
+      "weight": 0.5,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "SHY",
+          "name": "1—3年美国国债ETF",
+          "kind": "us_etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "dividend",
+      "name": "红利低波",
+      "weight": 0.1,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "510880.SH",
+          "name": "上证红利ETF",
+          "kind": "etf",
+          "until": "2019-04-01"
+        },
+        {
+          "code": "512890.SH",
+          "name": "红利低波ETF",
+          "kind": "etf",
+          "from": "2019-04-01"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "gold",
+      "name": "黄金",
+      "weight": 0.07,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "518880.SH",
+          "name": "黄金ETF",
+          "kind": "etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "mining",
+      "name": "紫金矿业",
+      "weight": 0.03,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "601899.SH",
+          "name": "紫金矿业",
+          "kind": "stock"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "china_growth",
+      "name": "国内成长",
+      "weight": 0.05,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "159915.SZ",
+          "name": "创业板ETF",
+          "kind": "etf",
+          "until": "2021-01-01"
+        },
+        {
+          "code": "588000.SH",
+          "name": "科创50ETF",
+          "kind": "etf",
+          "from": "2021-01-01"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "overseas_growth",
+      "name": "海外成长",
+      "weight": 0.05,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "513100.SH",
+          "name": "国泰纳斯达克100ETF",
+          "kind": "etf",
+          "exposure_market": "US",
+          "listing_market": "CN",
+          "currency": "CNY"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "overseas_broad",
+      "name": "海外宽基",
+      "weight": 0.08,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "513500.SH",
+          "name": "博时标普500ETF",
+          "kind": "etf",
+          "exposure_market": "US",
+          "listing_market": "CN",
+          "currency": "CNY"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "stocks",
+      "name": "A股精选",
+      "weight": 0.12,
+      "rebalance": "quarterly",
+      "assets": [],
+      "selection": {
+        "method": "quality_value",
+        "universe": "all_a",
+        "top_n": 5,
+        "exclude": [
+          "601899.SH"
+        ],
+        "leaders_per_industry": 5,
+        "max_per_industry": 1,
+        "min_roe": 8,
+        "max_pe_ttm": 60,
+        "max_pe": 80,
+        "max_debt": 80,
+        "positive_two_years": true,
+        "min_listing_days": 365,
+        "snapshot_max_age_days": 7,
+        "score_weights": {
+          "quality": 0.5,
+          "value": 0.35,
+          "size": 0.15
+        },
+        "fill_shortfall": "cash"
+      },
+      "weighting": {
+        "method": "min_variance",
+        "lookback": 126,
+        "min_observations": 60,
+        "max_weight": 0.4,
+        "shrinkage": 0.1
+      }
+    }
+  ],
+  "position_policy": "long_only"
+}

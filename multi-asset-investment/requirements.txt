@@ -1,0 +1,5 @@
+-r quant-data-kit/requirements.txt
+-r quant-strategy-kit/requirements.txt
+-r quant-report-kit/requirements.txt
+-r quant-rebalance-kit/requirements.txt
+# 直接海外证券或研究快照导入时另装quant-data-kit/requirements-extended.txt。

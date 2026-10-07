@@ -1,0 +1,16 @@
+{
+  "template_sha256": "0298e23b1761e78e55986d0023911c788ce5b4f5041f88ad17e11a5dcff518fb",
+  "template_bytes": 2865088,
+  "runtime": "Data app shared offline runtime",
+  "contains_downloaded_data": false,
+  "sources": {
+    "ReportContent.jsx": "90f8799d54a382467a697df161601cef8ee0cd98c3b2cb2e13ca0b05e24d8e22",
+    "report.css": "b1fa9b12d3344cb0852149ef55877efdfd499a5fc28a2fef5a7bc7f0a7d8ab79"
+  },
+  "build": {
+    "apiVersion": 1,
+    "runtimeSha256": "9e3ede84b28aded3c7379b6e6a5611f0d95b9977eb0f781e279ceefabfcbd27e",
+    "compilerSha256": "ec65601079c80bef7210f2c9760ff7f2db6adef28516ffff280d4c86f91d4078",
+    "buildKind": "separate-data-v1"
+  }
+}

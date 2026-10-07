@@ -1,0 +1,37 @@
+# 本地研究材料、真实数据、报告和参考项目留在原处。
+/output/
+/references/
+/research/
+/reports/
+/data/
+/cache/
+/runs/
+/tmp/
+/dist/
+/build/
+/*.docx
+/*.pptx
+/*.xlsx
+/*.pdf
+
+# 环境、系统文件与生成物。
+.venv*/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+*.zip
+*.parquet
+*.feather
+*.csv
+
+# 私有配置与凭证。配置样例可显式使用 .example 后缀。
+.env
+.env.*
+!.env.example
+credentials.json
+*.token
+*.pem
+*.key
+mcp_config.json

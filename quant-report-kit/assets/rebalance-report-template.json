@@ -1,0 +1,18 @@
+{
+  "id": "portfolio_rebalance_v1",
+  "version": "1.0",
+  "document_type": "rebalance_plan",
+  "audience": "commercial_client",
+  "title": "组合调仓计划",
+  "sections": [
+    {"id":"summary", "title":"计划概要", "source":["timing", "event", "account", "confirmation"]},
+    {"id":"allocation", "title":"资产配置调整", "source":["targets", "holdings", "cash_before", "cash_after"]},
+    {"id":"orders", "title":"拟交易清单", "source":["orders"]},
+    {"id":"holdings", "title":"持仓调整明细", "source":["holdings"]},
+    {"id":"rationale", "title":"配置依据", "source":["strategy", "regime", "selections", "optimization"]},
+    {"id":"constraints", "title":"执行约束与待处理事项", "source":["issues", "cash_after", "notes"]},
+    {"id":"calendar", "title":"后续调仓日历", "source":["next_events"]}
+  ],
+  "required_disclosures": ["全部资产只做多", "持仓确认状态及时间", "信号日与拟执行日", "报价时间及估算性质", "交易费用口径", "模拟账户标识", "未来信号更新要求"],
+  "evidence": "事实仅来自本次plan.json及strategy.json；数量为参考价估算，不标记为已成交。计划文件不包含未来收益预测。"
+}

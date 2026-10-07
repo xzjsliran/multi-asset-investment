@@ -1,0 +1,64 @@
+.report-page {
+  --data-app-layout-intent: authored-report;
+  --data-app-content-width: 1120px;
+  --data-app-layout-gutter: var(--data-app-report-gutter, 36px);
+  max-width: calc(var(--data-app-content-width) + 2 * var(--data-app-layout-gutter));
+  margin-inline: auto;
+  padding: 40px var(--data-app-layout-gutter) 100px;
+}
+.qr-report { display: grid; gap: 40px; width: 100%; }
+.qr-report > *, .qr-detail > * { min-width: 0; }
+.qr-report .report-hero { display: grid; gap: 18px; }
+.qr-report .report-hero h1 { margin: 0; font-size: 42px; letter-spacing: -.02em; line-height: 1.25; }
+.qr-eyebrow { color: var(--secondary); font-size: 13px; letter-spacing: .1em; }
+.qr-meta { display: flex; flex-wrap: wrap; gap: 10px 24px; color: var(--secondary); font-size: 14px; }
+.qr-lead { font-size: 23px; line-height: 1.65; }
+.qr-muted { color: var(--secondary); font-size: 14px; line-height: 1.7; }
+.qr-report .rich-narrative { line-height: 1.75; }
+.qr-report .rich-narrative p { margin: 0 0 12px; }
+.qr-report .component-title { font-size: 18px; line-height: 1.5; font-weight: 600; }
+.qr-table-scroll { overflow-x: auto; width: 100%; }
+.qr-table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.65; }
+.qr-table th { font-weight: 600; color: var(--secondary); white-space: nowrap; background: color-mix(in srgb, var(--text) 3%, transparent); }
+.qr-table :is(td,th) { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+.qr-table td { min-width: 90px; max-width: 520px; overflow-wrap: anywhere; }
+.qr-table td:first-child { min-width: 135px; }
+.qr-table .qr-number { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qr-pager { display: flex; gap: 14px; justify-content: flex-end; align-items: center; margin-top: 12px; font-size: 13px; color: var(--secondary); }
+.qr-pager button { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 5px 10px; border-radius: 6px; cursor: pointer; }
+.qr-pager button:disabled { opacity: .4; cursor: default; }
+.qr-section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.qr-section-heading h2 { margin: 0; font-size: 22px; font-weight: 600; }
+.qr-control { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; color: var(--secondary); font-size: 13px; }
+.qr-control select { max-width: min(420px, 85vw); padding: 9px 30px 9px 12px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; font: inherit; }
+.qr-detail { display: grid; gap: 28px; }
+.qr-disclosure { border-top: 1px solid var(--border); padding-top: 18px; }
+.qr-disclosure > summary { font-size: 15px; cursor: pointer; color: var(--secondary); margin-bottom: 18px; }
+.qr-disclosure[open] > :not(summary) { margin-bottom: 24px; }
+.qr-empty { color: var(--secondary); font-size: 14px; padding: 14px 0; }
+.qr-rules-section .rich-narrative { margin-bottom: 20px; }
+@media (max-width: 600px) {
+  .qr-report .report-hero h1 { font-size: 31px; }
+  .qr-lead { font-size: 19px; }
+  .qr-table { font-size: 12px; }
+  .qr-table :is(td,th) { padding: 10px; }
+  .qr-pager { justify-content: flex-start; flex-wrap: wrap; }
+  .qr-section-heading h2 { font-size: 20px; }
+}
+@media print {
+  .qr-report .qr-pager { display: none; }
+  .qr-report .qr-table-scroll { overflow: visible; }
+  .qr-report .qr-table { font-size: 10px; }
+}
+
+.qr-block { display: grid; gap: 28px; min-width: 0; }
+.qr-section-title { margin: 0; font-size: 24px; line-height: 1.5; font-weight: 600; }
+.qr-document-meta { border-top: 1px solid var(--border); padding-top: 16px; font-size: 12px; }
+.qr-summary { font-size: 16px; }
+.qr-report .rich-narrative h3 { font-size: 17px; margin: 22px 0 10px; }
+.qr-block .qr-section-heading { margin-bottom: 0; }
+@media (max-width: 600px) {
+  .qr-section-title { font-size: 21px; }
+  .qr-control select { max-width: 100%; width: 100%; }
+  .qr-control { max-width: 100%; width: 100%; }
+}

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "request.schema.json",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "mode": {
+      "enum": [
+        "live",
+        "demo"
+      ]
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "execution_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "initial_allocation": {
+      "type": "boolean",
+      "default": false
+    },
+    "max_quote_age_days": {
+      "type": "number",
+      "minimum": 0
+    },
+    "max_signal_gap_sessions": {
+      "type": "number",
+      "minimum": 0
+    },
+    "minimum_trade_value_cny": {
+      "type": "number",
+      "minimum": 0
+    },
+    "cash_buffer_cny": {
+      "type": "number",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "mode",
+    "as_of"
+  ]
+}

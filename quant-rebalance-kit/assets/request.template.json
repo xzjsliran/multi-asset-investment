@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "mode": "live",
+  "as_of": null,
+  "initial_allocation": false,
+  "max_quote_age_days": 7,
+  "max_signal_gap_sessions": 5,
+  "minimum_trade_value_cny": 0,
+  "cash_buffer_cny": 0
+}

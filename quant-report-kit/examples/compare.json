@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "title": "资产配置策略对比",
+  "alignment": "common",
+  "report": {
+    "version": "2.0"
+  },
+  "strategies": [
+    {
+      "id": "base",
+      "label": "基础配置策略",
+      "result_dir": "../../research/results/base",
+      "scenario": "strategy"
+    },
+    {
+      "id": "dynamic",
+      "label": "条件动态配置策略",
+      "result_dir": "../../research/results/dynamic",
+      "scenario": "strategy"
+    },
+    {
+      "id": "fixed",
+      "label": "固定权重对照",
+      "result_dir": "../../research/results/dynamic",
+      "scenario": "static"
+    }
+  ]
+}

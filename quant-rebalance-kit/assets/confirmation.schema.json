@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "confirmation.schema.json",
+  "type": "object",
+  "properties": {
+    "confirmed": {
+      "const": true
+    },
+    "context_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "confirmed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "user_statement": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "confirmed",
+    "context_digest",
+    "confirmed_at",
+    "user_statement"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "multi-asset-investment",
+  "description": "多资产投资研究：数据接入、资产配置、策略回测、风险分析、投资报告与调仓计划。",
+  "author": {"name": "xzjsliran"},
+  "repository": "https://github.com/xzjsliran/multi-asset-investment",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "多资产投资研究",
+    "shortDescription": "资产配置、回测比较、风险分析与调仓计划",
+    "longDescription": "在 Codex 中确认研究需求，调用配套 Python 完成数据清理、固定比例或宏观条件或风险平价配置、低频回测、专业投资报告和当前持仓调仓计划。数据和凭证保存在本地工作环境。",
+    "developerName": "xzjsliran",
+    "category": "Productivity",
+    "defaultPrompt": ["使用多资产投资研究插件，先检查环境，再和我确认研究年份、资产范围、配权方法及调仓频率。"]
+  }
+}

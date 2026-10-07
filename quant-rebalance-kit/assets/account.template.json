@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "source": "actual",
+  "position_policy": "long_only",
+  "as_of": null,
+  "positions": [],
+  "cash": [],
+  "strategy_state": {}
+}

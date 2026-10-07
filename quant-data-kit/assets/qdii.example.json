@@ -1,0 +1,25 @@
+{
+  "start": "2025-01-01",
+  "end": "2025-03-31",
+  "lookback_days": 0,
+  "provider": "auto",
+  "assets": [
+    {
+      "code": "513100.SH",
+      "kind": "etf",
+      "name": "国泰纳斯达克100ETF",
+      "asset_class": "海外股票",
+      "exposure_market": "US"
+    },
+    {
+      "code": "513500.SH",
+      "kind": "etf",
+      "name": "博时标普500ETF",
+      "asset_class": "海外股票",
+      "exposure_market": "US"
+    }
+  ],
+  "macro": [],
+  "nbs_urls": [],
+  "nbs_crawl_pages": 0
+}

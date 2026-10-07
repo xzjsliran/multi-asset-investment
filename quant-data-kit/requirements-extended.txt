@@ -1,0 +1,3 @@
+# 海外 ETF、汇率与 research 原始快照导入；基础境内取数可不安装。
+pyarrow==24.0.0
+yfinance==1.5.1

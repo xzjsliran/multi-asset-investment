@@ -1,0 +1,4 @@
+interface:
+  display_name: "多资产投资研究"
+  short_description: "完成多资产数据处理、策略回测、风险贡献分析、投资报告与持仓调仓计划"
+  default_prompt: "使用 $multi-asset-investment，先检查环境，再确认研究年份、资产范围、配权方式和调仓频率。"

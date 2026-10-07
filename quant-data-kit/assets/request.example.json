@@ -1,0 +1,17 @@
+{
+  "start": "2025-01-01",
+  "end": "2025-12-31",
+  "lookback_days": 120,
+  "provider": "auto",
+  "assets": [
+    {"code": "510300.SH", "kind": "etf", "name": "沪深300ETF", "asset_class": "股票"},
+    {"code": "511010.SH", "kind": "etf", "name": "国债ETF", "asset_class": "债券"},
+    {"code": "518880.SH", "kind": "etf", "name": "黄金ETF", "asset_class": "黄金"},
+    {"code": "159980.SZ", "kind": "etf", "name": "有色ETF", "asset_class": "商品"},
+    {"code": "159981.SZ", "kind": "etf", "name": "能源化工ETF", "asset_class": "商品"},
+    {"code": "159985.SZ", "kind": "etf", "name": "豆粕ETF", "asset_class": "商品"}
+  ],
+  "macro": ["cn_pmi", "cn_cpi_yoy", "fed_upper", "fed_effective", "us_cpi", "us_cpi_yoy", "us_10y", "us_30y", "us_unemployment", "us_nonfarm", "us_nonfarm_change", "vix", "world_gdp_growth"],
+  "nbs_urls": [],
+  "nbs_crawl_pages": 0
+}

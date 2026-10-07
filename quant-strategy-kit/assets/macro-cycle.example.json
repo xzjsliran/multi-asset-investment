@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "name": "增长与通胀四状态讨论示例",
+  "start": "2025-01-01",
+  "end": "2025-12-31",
+  "base_currency": "CNY",
+  "initial_capital": 1000000,
+  "cost_rate": 0,
+  "allocation_rebalance": "quarterly",
+  "max_valuation_gap": 10,
+  "benchmark": {
+    "code": "510300.SH",
+    "name": "沪深300ETF",
+    "kind": "etf"
+  },
+  "macro": {
+    "enabled": true,
+    "rebalance": "monthly",
+    "missing": "base_weights",
+    "rules": [
+      {
+        "name": "增长较强、通胀上升",
+        "all": [
+          {
+            "series": "cn_pmi",
+            "op": ">=",
+            "threshold": 50,
+            "max_age_days": 62
+          },
+          {
+            "series": "cn_cpi_yoy",
+            "transform": "change",
+            "periods": 1,
+            "op": ">=",
+            "threshold": 0,
+            "max_age_days": 62
+          }
+        ],
+        "weights": {
+          "bond": 0.3,
+          "equity": 0.3,
+          "gold": 0.1,
+          "commodity": 0.2,
+          "stocks": 0.1
+        }
+      },
+      {
+        "name": "增长较强、通胀回落",
+        "all": [
+          {
+            "series": "cn_pmi",
+            "op": ">=",
+            "threshold": 50,
+            "max_age_days": 62
+          },
+          {
+            "series": "cn_cpi_yoy",
+            "transform": "change",
+            "periods": 1,
+            "op": "<",
+            "threshold": 0,
+            "max_age_days": 62
+          }
+        ],
+        "weights": {
+          "bond": 0.4,
+          "equity": 0.35,
+          "gold": 0.1,
+          "commodity": 0.05,
+          "stocks": 0.1
+        }
+      },
+      {
+        "name": "增长偏弱、通胀上升",
+        "all": [
+          {
+            "series": "cn_pmi",
+            "op": "<",
+            "threshold": 50,
+            "max_age_days": 62
+          },
+          {
+            "series": "cn_cpi_yoy",
+            "transform": "change",
+            "periods": 1,
+            "op": ">=",
+            "threshold": 0,
+            "max_age_days": 62
+          }
+        ],
+        "weights": {
+          "bond": 0.45,
+          "equity": 0.1,
+          "gold": 0.25,
+          "commodity": 0.15,
+          "stocks": 0.05
+        }
+      },
+      {
+        "name": "增长偏弱、通胀回落",
+        "all": [
+          {
+            "series": "cn_pmi",
+            "op": "<",
+            "threshold": 50,
+            "max_age_days": 62
+          },
+          {
+            "series": "cn_cpi_yoy",
+            "transform": "change",
+            "periods": 1,
+            "op": "<",
+            "threshold": 0,
+            "max_age_days": 62
+          }
+        ],
+        "weights": {
+          "bond": 0.6,
+          "equity": 0.15,
+          "gold": 0.15,
+          "commodity": 0.05,
+          "stocks": 0.05
+        }
+      }
+    ]
+  },
+  "sleeves": [
+    {
+      "id": "bond",
+      "name": "境内国债",
+      "weight": 0.4,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "511010.SH",
+          "name": "国债ETF",
+          "kind": "etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "equity",
+      "name": "股票宽基",
+      "weight": 0.25,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "510300.SH",
+          "name": "沪深300ETF",
+          "kind": "etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "gold",
+      "name": "黄金",
+      "weight": 0.15,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "518880.SH",
+          "name": "黄金ETF",
+          "kind": "etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "commodity",
+      "name": "商品",
+      "weight": 0.1,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "159980.SZ",
+          "name": "有色ETF",
+          "kind": "etf"
+        },
+        {
+          "code": "159981.SZ",
+          "name": "能源化工ETF",
+          "kind": "etf"
+        },
+        {
+          "code": "159985.SZ",
+          "name": "豆粕ETF",
+          "kind": "etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "stocks",
+      "name": "A股动量组合",
+      "weight": 0.1,
+      "rebalance": "monthly",
+      "assets": [
+        {
+          "code": "600519.SH",
+          "name": "贵州茅台",
+          "kind": "stock"
+        },
+        {
+          "code": "000001.SZ",
+          "name": "平安银行",
+          "kind": "stock"
+        }
+      ],
+      "selection": {
+        "method": "momentum",
+        "lookback": 60,
+        "top_n": 2,
+        "min_return": 0.0,
+        "fill_shortfall": "cash"
+      },
+      "weighting": {
+        "method": "min_variance",
+        "lookback": 60,
+        "min_observations": 40,
+        "max_weight": 1.0,
+        "shrinkage": 0.1
+      }
+    }
+  ]
+}
