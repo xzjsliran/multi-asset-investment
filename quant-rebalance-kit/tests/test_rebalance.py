@@ -38,7 +38,7 @@ def fixture():
                "positions": [{"sleeve": "equity", "code": "A", "quantity": 80., "available_quantity": 80.},
                              {"sleeve": "bond", "code": "B", "quantity": 20., "available_quantity": 20.}],
                "cash": [{"sleeve": "cash", "currency": "CNY", "amount": 0.}]}
-    request = {"schema_version": 1, "mode": "demo", "as_of": asof, "execution_date": "2025-07-01"}
+    request = {"schema_version": 1, "mode": "simulation", "as_of": asof, "execution_date": "2025-07-01"}
     quotes = {"schema_version": 1, "fx": [], "quotes": [{"code": code, "price": 10., "price_basis": "raw", "currency": "CNY", "available_at": asof,
               "buy_lot": 1., "sell_lot": 1., "tradable": True, "source": "synthetic"} for code in ["A", "B", "C"]]}
     return c, data, account, request, quotes

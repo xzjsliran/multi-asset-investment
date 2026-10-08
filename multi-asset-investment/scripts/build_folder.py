@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 
 KITS = ["quant-data-kit","quant-strategy-kit","quant-report-kit","quant-rebalance-kit"]
@@ -13,12 +14,36 @@ REFERENCE_FILES = {
     "quant-data-kit": {"使用指南.md", "安装来源.md", "数据接口与口径.md",
                        "美国宏观与利率预期.md", "海外行情与历史财务扩展.md",
                        "境内QDII与海外行情选择.md", "iFinD可选数据源.md"},
-    "quant-strategy-kit": {"使用指南.md", "默认示例说明.md", "配置与计算说明.md",
+    "quant-strategy-kit": {"使用指南.md", "跨境资产配置说明.md", "配置与计算说明.md",
                            "回测结果与报告接口.md", "风险平价与风险贡献.md"},
     "quant-report-kit": {"使用指南.md", "投资回测报告规范.md", "接口与计算口径.md",
                          "监管依据与适用范围.md"},
     "quant-rebalance-kit": {"使用指南.md", "输入输出约定.md"},
 }
+
+
+INTERNAL_NAME = re.compile(
+    r"(?<![a-z])(?:friend|classroom|demo|teacher|student)(?![a-z])|朋友|教学|课堂|教师|学生|练习|试跑|讨论示例",
+    re.I,
+)
+
+
+def validate_product_names(path, content):
+    """检查分发路径及配置显示名称；拦截内部代称，不改写用户配置。"""
+    if INTERNAL_NAME.search(str(path)):
+        raise ValueError("分发路径须使用投资研究名称："+str(path))
+    if Path(path).suffix != ".json":
+        return
+    def visit(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {"name", "label", "title"} and isinstance(item, str) and INTERNAL_NAME.search(item):
+                    raise ValueError("配置名称含内部代称："+str(path)+" / "+key)
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+    visit(json.loads(content))
 
 
 def build(output):
@@ -58,6 +83,7 @@ def build(output):
     secrets = [get_credential(k).encode() for k in ["tushare","ifind"] if get_credential(k)]
     for f,rel in files:
         content=f.read_bytes()
+        validate_product_names(rel, content)
         if any(key in content for key in secrets):
             raise ValueError("源文件包含本机凭证，已停止生成插件："+str(rel))
     manifest={}

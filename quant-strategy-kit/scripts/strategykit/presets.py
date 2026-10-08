@@ -12,8 +12,8 @@ def fixed(sid, name, weight, assets):
 
 
 def preset(name):
-    if name == "risk-parity-demo":
-        c = preset("classroom-demo")
+    if name == "risk-parity-allocation":
+        c = preset("domestic-allocation")
         c["name"] = "多资产风险平价策略"
         c["sleeves"] = c["sleeves"][:4]
         for sleeve, weight in zip(c["sleeves"], [.4, .3, .2, .1]):
@@ -26,7 +26,7 @@ def preset(name):
          "base_currency": "CNY", "initial_capital": 1_000_000, "cost_rate": 0, "position_policy": "long_only",
          "allocation_rebalance": "quarterly", "max_valuation_gap": 10,
          "benchmark": asset("510300.SH", "沪深300ETF"), "macro": {"enabled": False}}
-    if name in {"friend-demo", "friend-qdii-demo"}:
+    if name in {"cross-border-allocation", "qdii-equity-allocation"}:
         c["long_gap_policy"] = "carry_and_flag"
         c["sleeves"] = [
             fixed("bond", "美元短债", .50, [asset("SHY", "1—3年美国国债ETF", "us_etf")]),
@@ -43,7 +43,7 @@ def preset(name):
                            "score_weights": {"quality": .5, "value": .35, "size": .15}, "fill_shortfall": "cash"},
              "weighting": {"method": "min_variance", "lookback": 126, "min_observations": 60, "max_weight": .4, "shrinkage": .1}}
         ]
-        if name == "friend-qdii-demo":
+        if name == "qdii-equity-allocation":
             c["name"] = "多资产配置策略（QDII权益）"
             replacements = {
                 "overseas_growth": asset("513100.SH", "国泰纳斯达克100ETF", exposure_market="US", listing_market="CN", currency="CNY"),
@@ -52,8 +52,8 @@ def preset(name):
             for sleeve in c["sleeves"]:
                 if sleeve["id"] in replacements:
                     sleeve["assets"] = [replacements[sleeve["id"]]]
-    elif name in {"classroom-demo", "macro-demo"}:
-        c["name"] = "境内多资产配置策略" if name == "classroom-demo" else "VIX动态资产配置策略"
+    elif name in {"domestic-allocation", "vix-dynamic-allocation"}:
+        c["name"] = "境内多资产配置策略" if name == "domestic-allocation" else "VIX动态资产配置策略"
         c["sleeves"] = [fixed("bond", "境内国债", .4, [asset("511010.SH", "国债ETF")]),
                         fixed("equity", "股票宽基", .25, [asset("510300.SH", "沪深300ETF")]),
                         fixed("gold", "黄金", .15, [asset("518880.SH", "黄金ETF")]),
@@ -62,12 +62,12 @@ def preset(name):
                          "assets": [asset("600519.SH", "贵州茅台", "stock"), asset("000001.SZ", "平安银行", "stock")],
                          "selection": {"method": "momentum", "lookback": 60, "top_n": 2, "min_return": 0., "fill_shortfall": "cash"},
                          "weighting": {"method": "min_variance", "lookback": 60, "min_observations": 40, "max_weight": 1., "shrinkage": .1}}]
-        if name == "macro-demo":
+        if name == "vix-dynamic-allocation":
             c["macro"] = {"enabled": True, "rebalance": "monthly", "missing": "base_weights", "rules": [
                 {"name": "波动偏高", "all": [{"series": "vix", "op": ">=", "threshold": 20, "max_age_days": 10}],
                  "weights": {"bond": .55, "equity": .15, "gold": .20, "commodity": .05, "stocks": .05}}]}
     else:
-        raise ValueError("可选 friend-demo、friend-qdii-demo、classroom-demo、macro-demo、risk-parity-demo。")
+        raise ValueError("可选 cross-border-allocation、qdii-equity-allocation、domestic-allocation、vix-dynamic-allocation、risk-parity-allocation。")
     return copy.deepcopy(c)
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 
 TEMPLATE = Path(__file__).resolve().parents[2] / "assets/investment-report-template.json"
-INTERNAL = re.compile(r"朋友示例|朋友组合|朋友原例|教学|课堂|练习|老师|学生|试跑|\bdemo\b", re.I)
+INTERNAL = re.compile(r"朋友示例|朋友组合|朋友原例|教学|课堂|练习|老师|学生|试跑|(?<![a-z])(?:demo|friend|classroom|teacher|student)(?![a-z])", re.I)
 PROMISE = re.compile(r"稳赚|保本保收益|保证盈利|保证收益|必然盈利|无风险获利|零风险投资|稳赚不赔")
 QUESTION = re.compile(r"[?？]|怎样|怎么|多少|先看|看它|看清|发现什么")
 

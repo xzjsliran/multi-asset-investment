@@ -52,14 +52,14 @@ def validate_inputs(config, account, request):
     c, a, r = validate(config), copy.deepcopy(account), copy.deepcopy(request)
     if a.get("schema_version") != 1 or r.get("schema_version") != 1:
         raise ValueError("账户与计划请求schema_version须为1。")
-    if r.get("mode") not in {"live", "demo"}:
-        raise ValueError("mode须为live或demo。")
+    if r.get("mode") not in {"live", "simulation"}:
+        raise ValueError("mode须为live或simulation。")
     if a.get("source") not in {"actual", "simulation"}:
         raise ValueError("账户source须为actual或simulation；计划推演结果不能直接视为实际持仓。")
     if r["mode"] == "live" and a["source"] != "actual":
         raise ValueError("实际计划必须使用用户确认的实际持仓，不能沿用模拟账户。")
-    if r["mode"] == "demo" and a["source"] != "simulation":
-        raise ValueError("演示模式须使用明确标记的模拟账户；实际账户请先完成用户确认。")
+    if r["mode"] == "simulation" and a["source"] != "simulation":
+        raise ValueError("历史模拟模式须使用明确标记的模拟账户；实际账户请先完成用户确认。")
     if a.get("position_policy", "long_only") != "long_only":
         raise ValueError("账户须为只做多账户。")
     asof, held_at = timestamp(r.get("as_of"), "数据截止时间"), timestamp(a.get("as_of"), "持仓时间")
@@ -130,7 +130,7 @@ def review(config, account, request):
 
 def require_confirmation(c, a, r, confirmation):
     expected = review(c, a, r)["context_digest"]
-    if r["mode"] == "demo":
+    if r["mode"] == "simulation":
         return {"status": "simulation", "context_digest": expected, "actual_account_confirmed": False}
     if not confirmation or confirmation.get("confirmed") is not True:
         raise ValueError("请先向用户确认当前策略与实际持仓，并记录用户回复后再生成实际调仓计划。")

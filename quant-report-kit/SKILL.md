@@ -7,7 +7,7 @@ description: 面向商业客户生成专业投资策略回测研究报告。读�
 
 全部资产只做多。接收回测时检查证券/大类/动态权重、已提供持仓和目标权重均非负，现金不透支；出现负持仓时先修复输入，不能继续生成只做多报告。负收益、回撤和卖出金额可以为负。外部输入只有净值时，明确“无法验证持仓方向”，不补造已核实声明。
 
-收到`quant-rebalance-kit`的`handoff.json`且`document_type=rebalance_plan`时，使用`rebalance --plan <调仓结果目录> --out <新报告目录>`，模板为[组合调仓计划](assets/rebalance-report-template.json)。先确认live计划已有用户确认记录；demo保留历史模拟标识。报告列示当前、目标和预计调整后的差异，不能把计划数量写成实际成交或未来收益预测。用`check --report-dir <报告目录>`复核。
+收到`quant-rebalance-kit`的`handoff.json`且`document_type=rebalance_plan`时，使用`rebalance --plan <调仓结果目录> --out <新报告目录>`，模板为[组合调仓计划](assets/rebalance-report-template.json)。先确认live计划已有用户确认记录；simulation保留历史模拟标识。报告列示当前、目标和预计调整后的差异，不能把计划数量写成实际成交或未来收益预测。用`check --report-dir <报告目录>`复核。
 
 默认读者是商业客户。采用专业投资研究表达；内部目录、预设ID及讨论代称只用于定位输入，不能作为客户显示名称。
 

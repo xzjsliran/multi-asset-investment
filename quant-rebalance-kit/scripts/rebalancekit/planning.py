@@ -277,7 +277,7 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
                   "本次生成计划不更新实际持仓。执行后须按真实成交重新核对账户。"]}
     if event["preliminary"]:
         result["notes"].append("尚未到计划信号日；本预案使用当前已知数据，信号日需重新计算。")
-    if r["mode"] == "demo":
+    if r["mode"] == "simulation":
         result["notes"].append("本报告使用模拟账户进行历史流程验证，日期及资产均为该历史时点的研究输入。")
     if not next_dates:
         result["notes"].append("当前交易日历未覆盖后续调仓日期，需补充日历后更新。")

@@ -18,7 +18,7 @@ from .analysis import selection_text, weighting_text, macro_text
 def validate_plan(p):
     if p.get("document_type") != "rebalance_plan" or p.get("position_policy") != "long_only":
         raise ValueError("调仓报告需要只做多的调仓计划。")
-    if p.get("mode") not in {"demo", "live"}:
+    if p.get("mode") not in {"simulation", "live"}:
         raise ValueError("计划缺少实际或模拟账户状态。")
     if p["mode"] == "live" and not p.get("confirmation", {}).get("actual_account_confirmed"):
         raise ValueError("实际计划尚未确认策略与持仓。")
@@ -127,11 +127,11 @@ def export_rebalance(directory, out):
     display_time = lambda value: pd.Timestamp(value).tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M")
     timing = p["timing"]
     status = {"preliminary": "调仓预案 · 信号日更新", "constrained": "调仓计划 · 存在执行约束", "calculated": "调仓计划"}[p["status"]]
-    nature = "历史模拟账户" if p["mode"] == "demo" else "已确认实际持仓"
+    nature = "历史模拟账户" if p["mode"] == "simulation" else "已确认实际持仓"
     event_text = "初始配置" if p["action"] == "initial_allocation" else ("大类资产配置调整" if p["event"]["is_outer"] else ("、".join(names[sid] for sid in p["event"]["selection_sleeves"])+"内部调仓" if p["event"]["selection_sleeves"] else "本日未触发调仓，维持持仓"))
     summary = f"{timing['execution_date']}拟执行{event_text}。参考总资产{fmt(p['account']['equity_cny'])}元，调整后预计现金{fmt(p['account']['cash_after_cny'])}元。所有资产只做多。"
     overview = [["策略名称", name], ["账户性质", nature], ["持仓记录时间", display_time(timing["holdings_as_of"])],
-                ["策略与持仓确认", "历史模拟账户" if p["mode"] == "demo" else display_time(p["confirmation"]["confirmed_at"])],
+                ["策略与持仓确认", "历史模拟账户" if p["mode"] == "simulation" else display_time(p["confirmation"]["confirmed_at"])],
                 ["数据截止时间", display_time(timing["as_of"])], ["本次采用的信号日", timing["signal_date"]],
                 ["计划信号日", timing["scheduled_signal_date"]], ["拟执行日期", timing["execution_date"]],
                 ["计划状态", status], ["交易成本率", "0%"], ["持仓方向", "全部资产只做多，现金不透支"]]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""组合管理与调仓计划：核对、报价提取、计算和历史演示。"""
+"""组合管理与调仓计划：核对、报价提取、计算和历史模拟。"""
 from __future__ import annotations
 import argparse
 import json
@@ -31,7 +31,7 @@ def main():
     q = sub.add_parser("quotes")
     for arg in ["data", "rules", "as-of", "out"]:
         q.add_argument("--"+arg, required=True)
-    q = sub.add_parser("demo")
+    q = sub.add_parser("simulation")
     for arg in ["config", "data", "signal-date", "out"]:
         q.add_argument("--"+arg, required=True)
     q = sub.add_parser("import-account", help="把持仓和现金CSV转换为待用户确认的账户JSON")
@@ -72,9 +72,9 @@ def main():
                 raise ValueError("报价文件已存在，请使用新文件名。")
             write_json(target, result)
             result = {"quotes": str(target.resolve()), "count": len(result["quotes"])}
-        elif args.command == "demo":
-            from rebalancekit.demo import historical_demo
-            result = historical_demo(read_config(args.config), Dataset.load(args.data), args.data, args.signal_date, args.out)
+        elif args.command == "simulation":
+            from rebalancekit.simulation import historical_simulation
+            result = historical_simulation(read_config(args.config), Dataset.load(args.data), args.data, args.signal_date, args.out)
         else:
             c = read_config(args.config)
             plan = make_plan(c, Dataset.load(args.data), read_json(args.account), read_json(args.request), read_json(args.quotes),

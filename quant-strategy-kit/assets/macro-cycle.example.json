@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "name": "增长与通胀四状态讨论示例",
+  "name": "增长与通胀四状态配置策略",
   "start": "2025-01-01",
   "end": "2025-12-31",
   "base_currency": "CNY",

@@ -9,7 +9,7 @@
     "mode": {
       "enum": [
         "live",
-        "demo"
+        "simulation"
       ]
     },
     "as_of": {

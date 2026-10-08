@@ -1,10 +1,10 @@
 # WorkBuddy 安装与首次使用
 
-此包将 `v0.2.0` 的多资产投资研究核心接入 WorkBuddy，包含统一 Skill、数据、策略、报告及调仓四个模块。
+此包将 `v0.3.0` 的多资产投资研究核心接入 WorkBuddy，包含统一 Skill、数据、策略、报告及调仓四个模块。
 
 ## 下载与解压
 
-从 [GitHub Release](https://github.com/xzjsliran/multi-asset-investment/releases/tag/v0.2.0) 下载 `multi-asset-investment-workbuddy-v0.2.0.zip`，完整解压得到 `multi-asset-investment-workbuddy` 文件夹。保留整个文件夹，包括 `.codebuddy-plugin` 隐藏目录，并放在后续可以持续访问的位置。
+从 [GitHub Release](https://github.com/xzjsliran/multi-asset-investment/releases/tag/v0.3.0) 下载 `multi-asset-investment-workbuddy-v0.3.0.zip`，完整解压得到 `multi-asset-investment-workbuddy` 文件夹。保留整个文件夹，包括 `.codebuddy-plugin` 隐藏目录，并放在后续可以持续访问的位置。
 
 包内是一个本地插件市场：`.codebuddy-plugin/marketplace.json` 登记插件 `multi-asset-investment`，插件本体在 `plugins/multi-asset-investment/`，其中包含统一 Skill、四个代码模块、报告模板和示例。不部署网页，也不注册 MCP 服务。
 

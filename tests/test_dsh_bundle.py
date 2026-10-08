@@ -113,7 +113,7 @@ class DSHDistribution(unittest.TestCase):
         self.assertEqual(status["network_requests"], 0)
         self.assertTrue(all(status["modules"].values()))
         config = Path(self.tmp.name) / "strategy.json"
-        run("strategy", "init", "--preset", "risk-parity-demo", "--out", str(config))
+        run("strategy", "init", "--preset", "risk-parity-allocation", "--out", str(config))
         plan = json.loads(run("strategy", "plan", "--config", str(config)))
         self.assertTrue(plan)
 

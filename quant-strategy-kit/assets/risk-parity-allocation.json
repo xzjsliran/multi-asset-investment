@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "name": "多资产风险平价策略",
+  "start": "2025-01-01",
+  "end": "2025-12-31",
+  "base_currency": "CNY",
+  "initial_capital": 1000000,
+  "cost_rate": 0,
+  "position_policy": "long_only",
+  "allocation_rebalance": "quarterly",
+  "max_valuation_gap": 10,
+  "benchmark": {
+    "code": "510300.SH",
+    "name": "沪深300ETF",
+    "kind": "etf"
+  },
+  "macro": {
+    "enabled": false
+  },
+  "sleeves": [
+    {
+      "id": "bond",
+      "name": "境内国债",
+      "weight": 0.4,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "511010.SH",
+          "name": "国债ETF",
+          "kind": "etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "equity",
+      "name": "股票宽基",
+      "weight": 0.3,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "510300.SH",
+          "name": "沪深300ETF",
+          "kind": "etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "gold",
+      "name": "黄金",
+      "weight": 0.2,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "518880.SH",
+          "name": "黄金ETF",
+          "kind": "etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
+      "id": "commodity",
+      "name": "商品",
+      "weight": 0.1,
+      "rebalance": "quarterly",
+      "assets": [
+        {
+          "code": "159980.SZ",
+          "name": "有色ETF",
+          "kind": "etf"
+        },
+        {
+          "code": "159981.SZ",
+          "name": "能源化工ETF",
+          "kind": "etf"
+        },
+        {
+          "code": "159985.SZ",
+          "name": "豆粕ETF",
+          "kind": "etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    }
+  ],
+  "allocation": {
+    "method": "risk_parity",
+    "lookback": 126,
+    "min_observations": 60,
+    "shrinkage": 0.1,
+    "invested_weight": 1.0,
+    "fallback": "base_weights",
+    "proxies": {
+      "bond": [
+        {
+          "code": "511010.SH",
+          "name": "国债ETF",
+          "kind": "etf"
+        }
+      ],
+      "equity": [
+        {
+          "code": "510300.SH",
+          "name": "沪深300ETF",
+          "kind": "etf"
+        }
+      ],
+      "gold": [
+        {
+          "code": "518880.SH",
+          "name": "黄金ETF",
+          "kind": "etf"
+        }
+      ],
+      "commodity": [
+        {
+          "code": "159980.SZ",
+          "name": "有色ETF",
+          "kind": "etf"
+        },
+        {
+          "code": "159981.SZ",
+          "name": "能源化工ETF",
+          "kind": "etf"
+        },
+        {
+          "code": "159985.SZ",
+          "name": "豆粕ETF",
+          "kind": "etf"
+        }
+      ]
+    }
+  }
+}

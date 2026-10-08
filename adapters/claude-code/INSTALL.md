@@ -1,10 +1,10 @@
 # Claude Code 安装与使用
 
-此包将 `v0.2.0` 的多资产投资研究核心接入 Claude Code，包含统一 Skill、数据、策略、报告及调仓四个模块。
+此包将 `v0.3.0` 的多资产投资研究核心接入 Claude Code，包含统一 Skill、数据、策略、报告及调仓四个模块。
 
 ## 下载与安装
 
-从 [GitHub Release](https://github.com/xzjsliran/multi-asset-investment/releases/tag/v0.2.0) 下载 `multi-asset-investment-claude-code-v0.2.0.zip`，完整解压得到 `multi-asset-investment-claude-code` 文件夹。将其放到固定位置，保留 `.claude-plugin` 隐藏目录。
+从 [GitHub Release](https://github.com/xzjsliran/multi-asset-investment/releases/tag/v0.3.0) 下载 `multi-asset-investment-claude-code-v0.3.0.zip`，完整解压得到 `multi-asset-investment-claude-code` 文件夹。将其放到固定位置，保留 `.claude-plugin` 隐藏目录。
 
 在终端执行，替换为解压文件夹的实际完整路径：
 

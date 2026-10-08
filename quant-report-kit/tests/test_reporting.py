@@ -42,7 +42,7 @@ class Reporting(unittest.TestCase):
 
     def test_invalid_client_copy_is_rejected(self):
         r=run_fixture()
-        for title in ('三套资产配置策略对比','收益怎样走到今天','策略回测？','朋友示例报告'):
+        for title in ('三套资产配置策略对比','收益怎样走到今天','策略回测？','朋友示例报告','friend_demo','classroom-demo'):
             with self.assertRaises(ValueError):analyse({'title':title},[r])
         d=analyse({},[r])
         with self.assertRaisesRegex(ValueError,'收益保证'):

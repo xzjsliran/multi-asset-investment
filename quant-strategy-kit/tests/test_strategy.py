@@ -61,7 +61,7 @@ class StrategyRules(unittest.TestCase):
             self.assertEqual(json.loads((out / 'unfilled_at_end.json').read_text()), [])
 
     def test_qdii_variant_changes_equity_instruments_preserves_bond_and_rules(self):
-        base, qdii = preset('friend-demo'), validate(preset('friend-qdii-demo'))
+        base, qdii = preset('cross-border-allocation'), validate(preset('qdii-equity-allocation'))
         for original, changed in zip(base['sleeves'], qdii['sleeves']):
             if original['id'] in {'overseas_growth', 'overseas_broad'}:
                 self.assertEqual(changed['assets'][0]['kind'], 'etf')
@@ -199,7 +199,7 @@ class StrategyRules(unittest.TestCase):
         self.assertEqual(result.annual_roe.iloc[0], 12)
         self.assertEqual(result.annual_count.iloc[0], 2)
 
-    def test_custom_filter_does_not_inherit_demo_leader_or_cashflow_rules(self):
+    def test_custom_filter_does_not_inherit_preset_leader_or_cashflow_rules(self):
         features = pd.DataFrame([{"code": "600001.SH", "snapshot_date": pd.Timestamp("2024-12-31"),
                                  "ann_date": pd.Timestamp("2024-11-01"), "annual_ann_date": pd.Timestamp("2024-03-01"),
                                  "annual_end_date": pd.Timestamp("2023-12-31"), "end_date": pd.Timestamp("2024-09-30"),

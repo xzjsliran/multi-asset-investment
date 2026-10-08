@@ -14,7 +14,7 @@ def main():
     commands.add_parser("catalog")
     commands.add_parser("doctor")
     q = commands.add_parser("init")
-    q.add_argument("--preset", choices=["friend-demo", "friend-qdii-demo", "classroom-demo", "macro-demo", "risk-parity-demo"], default="friend-demo")
+    q.add_argument("--preset", choices=["cross-border-allocation", "qdii-equity-allocation", "domestic-allocation", "vix-dynamic-allocation", "risk-parity-allocation"], default="cross-border-allocation")
     q.add_argument("--out", required=True)
     q = commands.add_parser("plan")
     q.add_argument("--config", required=True)

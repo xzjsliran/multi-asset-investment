@@ -122,7 +122,7 @@ class Client:
                 self.log.append(dict(spec, status="fetched", fetched_at=data["fetched_at"], cache_key=key))
                 return data["result"]
             except subprocess.TimeoutExpired:
-                # 单次硬超时后交给备用源，不继续长时间占用课堂。
+                # 单次请求达到超时上限后切换备用数据源。
                 error = "接口超过 " + str(self.timeout) + " 秒未完成"
                 break
             except Exception as exc:

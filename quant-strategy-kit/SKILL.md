@@ -11,7 +11,7 @@ description: 为商业客户的资产配置研究把用户的资产范围、选�
 
 ## 一次需求对话
 
-沿用当前对话和第一部分已有的信息，只补问影响本次计算的缺项。用户说“先用默认示例”时直接选 `friend-demo`，无需再逐项询问。
+沿用当前对话和第一部分已有的信息，只补问影响本次计算的缺项。用户说“先用默认示例”时直接选 `cross-border-allocation`，无需再逐项询问。
 
 - 资产：是否包含股票、债券、黄金、其他商品、海外资产。用户需要列表时调用 `scripts/run.py catalog`，再明确代码；黄金ETF和矿业股票分别列出。
 - 海外股票先检查境内QDII产品及历史覆盖，例如513100/513500，类型仍是etf；实际行情按境内人民币价格获取。用户明确指定美国证券，或合适境内产品/数据不足时再采用us_etf与汇率。变更证券要在配置中明确，不把QQQ/SPY价格拼进QDII历史。
@@ -25,7 +25,7 @@ description: 为商业客户的资产配置研究把用户的资产范围、选�
 ## 运行
 
 1. 定位本 Skill 和数据模块。默认两者为同级 `quant-strategy-kit` / `quant-data-kit`；不同目录用 `--data-kit` 指明。读取现有环境，首次按使用指南安装依赖；本模块新增SciPy，数据模块的海外与快照扩展另有依赖。
-2. `scripts/run.py init --preset friend-demo --out <工作目录/strategy.json>`；修改副本。明确使用境内QDII版本时选 `friend-qdii-demo`；境内多资产配置用 `classroom-demo`；VIX动态参考用 `macro-demo`；风险平价参考用`risk-parity-demo`。
+2. `scripts/run.py init --preset cross-border-allocation --out <工作目录/strategy.json>`；修改副本。明确使用境内QDII版本时选 `qdii-equity-allocation`；境内多资产配置用 `domestic-allocation`；VIX动态参考用 `vix-dynamic-allocation`；风险平价参考用`risk-parity-allocation`。
 3. `scripts/run.py plan --config <配置> --out <工作目录/data-plan.json>` 查看数据需求。
 4. 已有第一部分结果可直接用于回测。缺数据时：`scripts/run.py prepare --config <配置> --data-kit <数据模块目录> --work <新工作目录>`。已有归档研究数据时可追加 `--research <归档研究目录>` 只读重建历史输入。历史财务选股需要本地Tushare权限；不可悄悄拿今天的财务或当前成分股回填历史。
 5. `scripts/run.py backtest --config <配置> --data <标准数据目录> --out <新结果目录>`。所有路径替换为实际绝对路径，固定使用同一个环境的Python。数据、缓存、结果都写工作目录，不写Skill目录。
@@ -33,13 +33,13 @@ description: 为商业客户的资产配置研究把用户的资产范围、选�
 
 ## 解释结果时需知道
 
-- 默认配置采用最小方差配权、零成本及中国交易日记账，参数与假设见 [默认示例说明](references/默认示例说明.md)。
+- 默认配置采用最小方差配权、零成本及中国交易日记账，参数与假设见 [跨境资产配置说明](references/跨境资产配置说明.md)。
 - 协方差只取信号日前的收益，默认126个交易日；共同观测少于60次或求解失败时记录等权回退。目标为不做空、权重和为1；默认单股最多占精选部分40%，可改。
 - 信号日与成交日分开。通常本期末形成信号，下期首个交易日收盘记账；当日收益归原持仓。不同部分独立持有，不做隐含每日再平衡。
 - 宏观使用第一部分 `macro_observations.csv` 中 `signal_eligible=true` 且 `available_at` 不晚于决策时点的记录。美国月度历史快照可用数据模块 `fred-events` 转换；缺指标按配置处理，记录到regimes.json，不能手工把未核验记录改成可用。
 - `carry_and_flag` 仅沿用最后已知价估值，缺报价时不会成交；价格研究序列仍保留缺失。常规配置默认长期缺报价就报错，归档长区间配置采用沿用并记录。
 - 持仓比例和最新一次历史目标可以解释为“按这套规则算出的结果”。本模块未接券商账户，也不自动预测或下单。
 
-用户询问下一次实际调仓时，转到相邻的`quant-rebalance-kit/SKILL.md`，先确认当前策略与实际持仓。两模块共用`strategykit.decision.decide`；不能从历史期末目标直接复制当前买卖指令。`final_state.json`是复权单位的历史模拟状态，须按原始报价换算才能用于明确标记的演示账户。
+用户询问下一次实际调仓时，转到相邻的`quant-rebalance-kit/SKILL.md`，先确认当前策略与实际持仓。两模块共用`strategykit.decision.decide`；不能从历史期末目标直接复制当前买卖指令。`final_state.json`是复权单位的历史模拟状态，须按原始报价换算才能用于明确标记的模拟账户。
 
 用户改变年份、资产或规则时保存新配置并检查数据覆盖。改变股票调仓频率还会改变历史估值截面需求；仅改等权/最小方差时可复用同一份输入。

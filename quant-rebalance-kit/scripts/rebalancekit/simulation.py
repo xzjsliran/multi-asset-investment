@@ -13,14 +13,14 @@ from .planning import make_plan
 from .exports import export_plan, new_output
 
 
-def historical_demo(config, data, data_directory, signal_date, output):
+def historical_simulation(config, data, data_directory, signal_date, output):
     signal = pd.Timestamp(signal_date)
     available = data.calendar[data.calendar > signal]
     if signal not in data.calendar or available.empty:
-        raise ValueError("演示需要信号日及随后执行日的交易日历。")
+        raise ValueError("历史模拟需要信号日及随后执行日的交易日历。")
     execution = available[0]
     if signal <= pd.Timestamp(config["start"]):
-        raise ValueError("演示信号日需晚于回测起始日，才能取得此前持仓。")
+        raise ValueError("历史模拟信号日需晚于回测起始日，才能取得此前持仓。")
     history = copy.deepcopy(config)
     history["end"] = str(signal.date())
     result = backtest(history, data)
@@ -49,7 +49,7 @@ def historical_demo(config, data, data_directory, signal_date, output):
         cash.append({"sleeve": sid, "currency": "CNY", "amount": max(0., book["cash"])})
     account = {"schema_version": 1, "source": "simulation", "as_of": asof, "positions": positions, "cash": cash,
                "strategy_state": {"previous_allocation": state["previous_allocation"], "inner_weights": state["inner"]}}
-    request = {"schema_version": 1, "mode": "demo", "as_of": asof, "execution_date": str(execution.date()), "initial_allocation": False}
+    request = {"schema_version": 1, "mode": "simulation", "as_of": asof, "execution_date": str(execution.date()), "initial_allocation": False}
     plan = make_plan(config, data, account, request, quoted)
     # 用同一历史事件的回测目标做复核：目标权重应在所有内部部分同时调仓时一致。
     full = copy.deepcopy(config)
