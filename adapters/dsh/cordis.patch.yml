@@ -1,0 +1,5 @@
+# DSH 组合层：登记本包为一行插件，插件入口把包内统一 Skill 注册到会话技能目录。
+# 行名使用包名，插件管理器从解压目录安装本包到当前 profile。
+- insert:
+    - id: multi-asset-investment
+      name: 'multi-asset-investment'

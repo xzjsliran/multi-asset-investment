@@ -36,3 +36,6 @@ credentials.json
 *.pem
 *.key
 mcp_config.json
+
+# 宿主在本机生成的会话记忆，不属于平台适配源码。
+/.workbuddy/
