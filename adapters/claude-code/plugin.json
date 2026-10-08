@@ -1,0 +1,7 @@
+{
+  "name": "multi-asset-investment",
+  "description": "多资产投资研究：数据接入、资产配置、策略回测、风险分析、投资报告与调仓计划。",
+  "author": {"name": "xzjsliran"},
+  "repository": "https://github.com/xzjsliran/multi-asset-investment",
+  "keywords": ["asset-allocation", "backtesting", "portfolio", "investment-research"]
+}

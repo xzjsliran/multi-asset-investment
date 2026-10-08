@@ -2,6 +2,8 @@
 
 本项目面向商业客户，提供数据接入、资产配置研究、策略回测、结果分析及专业报告。通过可调用的代码、Skill和模板接入WorkBuddy等宿主智能体。
 
+目录用途与常用入口见[项目导航](docs/项目导航.md)。本地方案及申报文件集中在 `资料/`；历史运行结果集中在 `output/验证与测试/`；正式安装包在 `output/releases/`。这些本地资料和结果不随源码上传。
+
 | 模块 | 工作内容 | 入口 |
 |---|---|---|
 | 数据接入与处理 | 市场、财务和宏观数据，代码与日历统一，历史信息时点及质量检查 | [quant-data-kit](quant-data-kit/README.md) |
@@ -13,7 +15,12 @@
 
 ## 安装与运行
 
-直接使用 Codex 的用户，从 [Releases](https://github.com/xzjsliran/multi-asset-investment/releases) 下载 `multi-asset-investment-codex-v*.zip`，解压后按包内 `INSTALL.md` 安装。GitHub 自动附带的 Source code 是源码快照；Codex 安装包是单独列出的 ZIP 附件。
+从 [Releases](https://github.com/xzjsliran/multi-asset-investment/releases) 选择对应平台的 ZIP，完整解压后按包内 `INSTALL.md` 安装。GitHub 自动附带的 Source code 是源码快照。
+
+| 平台 | 安装包 | 安装说明 |
+|---|---|---|
+| Codex | `multi-asset-investment-codex-v*.zip` | [安装说明](adapters/codex/INSTALL.md) |
+| Claude Code | `multi-asset-investment-claude-code-v*.zip` | [安装说明](adapters/claude-code/INSTALL.md) |
 
 开发环境使用 Python 3.11 或 3.12，在仓库根目录执行：
 
@@ -30,8 +37,8 @@ Windows 使用 `py -3.11 -m venv .venv` 和 `.venv\Scripts\Activate.ps1`。直�
 
 ## 开发、适配与发布
 
-四个 kit 和统一入口各保留一份源码；平台差异放在 `adapters/`，安装包由 `scripts/build_codex_release.py` 生成。当前提供 Codex 适配，WorkBuddy 等平台可继续调用通用 Skill，专用安装包另行适配。
+四个 kit 和统一入口各保留一份源码；平台差异放在 `adapters/`，安装包分别由 `scripts/build_codex_release.py` 和 `scripts/build_claude_code_release.py` 生成。当前提供 Codex 和 Claude Code 适配；WorkBuddy 等平台可继续调用通用 Skill，专用安装包另行适配。
 
-版本号在 `VERSION`。源码、适配说明和构建脚本进入 Git；生成目录与 ZIP 放在本地 `output/`，上传至对应版本的 GitHub Release。维护步骤见[项目维护与发布](docs/项目维护与发布.md)，Codex 安装方法见[Codex 安装说明](adapters/codex/INSTALL.md)。
+版本号在 `VERSION`。源码、适配说明和构建脚本进入 Git；生成目录与 ZIP 放在本地 `output/`，上传至对应版本的 GitHub Release。维护步骤见[项目维护与发布](docs/项目维护与发布.md)，平台安装方法见上表。Claude Code 追加包固定复用核心标签 `v0.1.0`，适配层提交单独记入包内清单。
 
 报告使用[投资回测报告规范](quant-report-kit/references/投资回测报告规范.md)；跨模块要求见[AGENTS.md](AGENTS.md)。学生从头开发的指南单独放在各模块 `references/` 中，客户报告和产品界面采用投资研究表达。

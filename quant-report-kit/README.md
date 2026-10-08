@@ -18,7 +18,7 @@
 
 ```bash
 .venv-data/bin/python quant-report-kit/scripts/run.py single \
-  --result "output/策略数据交接_20261007/VIX动态配置_2025" \
+  --result "output/验证与测试/策略数据交接_20261007/VIX动态配置_2025" \
   --name "VIX动态资产配置策略" --title "动态配置策略回测分析" \
   --out "output/动态配置研究报告"
 ```
