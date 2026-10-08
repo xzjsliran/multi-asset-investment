@@ -8,7 +8,7 @@ import sys
 
 
 def main():
-    p = argparse.ArgumentParser(description="量化教学数据接入套装")
+    p = argparse.ArgumentParser(description="多资产投资研究数据接入套装")
     sub = p.add_subparsers(dest="command", required=True)
     d = sub.add_parser("doctor", help="检查依赖和本地凭证是否存在，不显示凭证")
     d.add_argument("--live-tushare", action="store_true", help="用本地凭证测试交易日历连接")

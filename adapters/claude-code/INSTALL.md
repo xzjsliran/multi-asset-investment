@@ -1,10 +1,10 @@
 # Claude Code 安装与使用
 
-此包将 `v0.1.0` 的多资产投资研究核心接入 Claude Code，包含统一 Skill、数据、策略、报告及调仓四个模块。
+此包将 `v0.2.0` 的多资产投资研究核心接入 Claude Code，包含统一 Skill、数据、策略、报告及调仓四个模块。
 
 ## 下载与安装
 
-从 [GitHub Release](https://github.com/xzjsliran/multi-asset-investment/releases/tag/v0.1.0) 下载 `multi-asset-investment-claude-code-v0.1.0.zip`，完整解压得到 `multi-asset-investment-claude-code` 文件夹。将其放到固定位置，保留 `.claude-plugin` 隐藏目录。
+从 [GitHub Release](https://github.com/xzjsliran/multi-asset-investment/releases/tag/v0.2.0) 下载 `multi-asset-investment-claude-code-v0.2.0.zip`，完整解压得到 `multi-asset-investment-claude-code` 文件夹。将其放到固定位置，保留 `.claude-plugin` 隐藏目录。
 
 在终端执行，替换为解压文件夹的实际完整路径：
 
@@ -31,7 +31,7 @@ claude --plugin-dir "/完整路径/multi-asset-investment-claude-code"
 
 > 使用多资产投资研究插件。先和我确认研究工作目录，在其中准备 Python 环境。随后确认研究年份、资产范围、配权方法和调仓频率，给出数据计划。Tushare 和 iFinD 是可选项，已有凭证请复用，缺少凭证时先用免费来源。
 
-环境需要 Python 3.11 或 3.12。让 Claude Code 读取包内 `skills/multi-asset-investment/references/claude-code-runtime.md`，按实际路径安装依赖。安装包包含方法、模板、示例及人工测试代码，真实行情、账户、研究结果、虚拟环境和密钥由使用者在插件外管理。
+环境需要 Python 3.11 或 3.12。让 Claude Code 读取包内 `skills/multi-asset-investment/references/claude-code-runtime.md`，按实际路径安装依赖。安装包包含方法、模板和示例，真实行情、账户、研究结果、虚拟环境和密钥由使用者在插件外管理。
 
 后续可以发送：
 
@@ -43,6 +43,6 @@ claude --plugin-dir "/完整路径/multi-asset-investment-claude-code"
 
 `bundle-manifest.json` 分别记录核心源码提交、适配源码提交和文件指纹。`SHA256SUMS-claude-code.txt` 用于核对 ZIP 下载完整性，随 Release 单独提供。
 
-遇到问题时反馈 Claude Code 版本、操作系统、使用的指令及去除密钥和账户信息后的报错。可在 [Issues](https://github.com/xzjsliran/multi-asset-investment/issues) 提交；下载和反馈需要仓库访问权限。
+遇到问题时反馈 Claude Code 版本、操作系统、使用的指令及去除密钥和账户信息后的报错。可在 [Issues](https://github.com/xzjsliran/multi-asset-investment/issues) 提交；下载与反馈入口均为公开。
 
 适配依据：[插件清单](https://code.claude.com/docs/en/plugins-reference)、[本地插件目录与安装](https://code.claude.com/docs/en/plugin-marketplaces)、[Skill 命名与路径变量](https://code.claude.com/docs/en/skills)。

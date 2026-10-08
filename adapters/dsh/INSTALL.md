@@ -1,10 +1,10 @@
 # DeepSeek Harness 安装与首次使用
 
-此包将 `v0.1.0` 的多资产投资研究核心接入 DeepSeek Harness（DSH），包含统一 Skill、数据、策略、报告及调仓四个模块。
+此包将 `v0.2.0` 的多资产投资研究核心接入 DeepSeek Harness（DSH），包含统一 Skill、数据、策略、报告及调仓四个模块。
 
 ## 下载与解压
 
-从 [GitHub Release](https://github.com/xzjsliran/multi-asset-investment/releases/tag/v0.1.0) 下载 `multi-asset-investment-dsh-v0.1.0.zip`，完整解压得到 `multi-asset-investment-dsh` 文件夹，放在后续可以持续访问的位置。包内是一个 DSH 组合包：`package.json` 声明组合入口，`cordis.patch.yml` 登记一行插件，`index.js` 把包内统一 Skill 注册到会话技能目录，`skills/multi-asset-investment/` 包含统一 Skill、四个代码模块、报告模板和示例。不部署网页，也不注册 MCP 服务。
+从 [GitHub Release](https://github.com/xzjsliran/multi-asset-investment/releases/tag/v0.2.0) 下载 `multi-asset-investment-dsh-v0.2.0.zip`，完整解压得到 `multi-asset-investment-dsh` 文件夹，放在后续可以持续访问的位置。包内是一个 DSH 组合包：`package.json` 声明组合入口，`cordis.patch.yml` 登记一行插件，`index.js` 把包内统一 Skill 注册到会话技能目录，`skills/multi-asset-investment/` 包含统一 Skill、四个代码模块、报告模板和示例。不部署网页，也不注册 MCP 服务。
 
 ## 安装到 DSH
 
@@ -23,7 +23,7 @@ DSH 会扫描用户与项目的技能目录。把包内 `skills/multi-asset-inve
 
 > 使用多资产投资研究技能。先和我确认研究工作目录，在其中准备 Python 环境。随后确认研究年份、资产范围、配权方法和调仓频率，给出数据计划。Tushare 和 iFinD 是可选项，已有凭证请复用，缺少凭证时先用免费来源。
 
-环境需要 Python 3.11 或 3.12，DSH 自带的受管解释器不作为本项目运行环境。让 Agent 读取 Skill 目录下的 `references/dsh-runtime.md`，按实际路径安装依赖。安装包包含方法、模板、示例及人工测试代码；真实行情、账户、研究结果、虚拟环境和密钥由使用者在插件外管理。DSH 默认按工作区写入权限运行，建议把会话工作区设为研究工作目录。
+环境需要 Python 3.11 或 3.12，DSH 自带的受管解释器不作为本项目运行环境。让 Agent 读取 Skill 目录下的 `references/dsh-runtime.md`，按实际路径安装依赖。安装包包含方法、模板和示例；真实行情、账户、研究结果、虚拟环境和密钥由使用者在插件外管理。DSH 默认按工作区写入权限运行，建议把会话工作区设为研究工作目录。
 
 后续可以发送：
 
@@ -35,4 +35,4 @@ DSH 会扫描用户与项目的技能目录。把包内 `skills/multi-asset-inve
 
 `package.json` 记录包名与版本；`bundle-manifest.json` 记录核心源码提交、适配层提交和逐文件 SHA-256。Release 的 `SHA256SUMS-dsh.txt` 用于核对 ZIP 下载完整性。安装包不包含真实行情、账户、历史报告、环境或密钥。
 
-遇到问题时反馈 DSH 版本、操作系统、使用的指令及去除密钥和账户信息后的报错。可在 [Issues](https://github.com/xzjsliran/multi-asset-investment/issues) 提交；下载和反馈需要仓库访问权限。
+遇到问题时反馈 DSH 版本、操作系统、使用的指令及去除密钥和账户信息后的报错。可在 [Issues](https://github.com/xzjsliran/multi-asset-investment/issues) 提交；下载与反馈入口均为公开。

@@ -17,27 +17,27 @@
 复用前两部分的Python环境，或安装本目录requirements.txt。
 
 ```bash
-.venv-data/bin/python quant-report-kit/scripts/run.py single \
-  --result "output/验证与测试/策略数据交接_20261007/VIX动态配置_2025" \
+"研究目录/.venv/bin/python" quant-report-kit/scripts/run.py single \
+  --result "研究目录/results/dynamic" \
   --name "VIX动态资产配置策略" --title "动态配置策略回测分析" \
-  --out "output/动态配置研究报告"
+  --out "研究目录/reports/dynamic"
 ```
 
 多策略使用[配置样例](examples/compare.json)，修改结果目录后执行：
 
 ```bash
-.venv-data/bin/python quant-report-kit/scripts/run.py build \
+"研究目录/.venv/bin/python" quant-report-kit/scripts/run.py build \
   --config "研究目录/compare.json" --out "研究目录/报告版本1"
-.venv-data/bin/python quant-report-kit/scripts/run.py check \
+"研究目录/.venv/bin/python" quant-report-kit/scripts/run.py check \
   --report-dir "研究目录/报告版本1"
 ```
 
-详细步骤见[使用指南](references/使用指南.md)。当前报告结构为2.1版，包含实际风险贡献及组合调仓的目标风险估计，继续检查全部资产只做多。统一验证入口见项目根目录README。此前报告保留在原输出目录。
+详细步骤见[使用指南](references/使用指南.md)。当前报告结构为2.1版，包含实际风险贡献及组合调仓的目标风险估计，继续检查全部资产只做多。
 
 ## 模块衔接
 
 数据模块提供市场和宏观输入，策略模块保存规则、账户、持仓和决策，报告模块重算所选区间并形成研究结论。需要修改投资规则时，先保存新配置并重新回测。报告中的期末持仓带有历史日期。
 
-套装仅包含代码、空模板、Schema、Skill、说明和人工测试；真实市场数据、客户结果及凭证由使用者本地保存。最终仍以文件夹形式与其他模块整合。
+套装仅包含代码、空模板、Schema、Skill和说明；真实市场数据、客户结果及凭证由使用者本地保存。
 
-[接口与计算口径](references/接口与计算口径.md) · [维护与验证](references/维护与验证.md) · [监管依据与适用范围](references/监管依据与适用范围.md)
+[接口与计算口径](references/接口与计算口径.md) · [监管依据与适用范围](references/监管依据与适用范围.md)

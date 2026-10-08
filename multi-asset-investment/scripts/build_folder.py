@@ -7,7 +7,18 @@ import shutil
 
 KITS = ["quant-data-kit","quant-strategy-kit","quant-report-kit","quant-rebalance-kit"]
 SUFFIXES = {".py",".md",".json",".jsx",".css",".html",".txt",".yaml"}
-DIRECTORIES = {"scripts","references","assets","templates","examples","tests","agents"}
+DIRECTORIES = {"scripts","references","assets","templates","examples","agents"}
+REFERENCE_FILES = {
+    "multi-asset-investment": {"使用指南.md"},
+    "quant-data-kit": {"使用指南.md", "安装来源.md", "数据接口与口径.md",
+                       "美国宏观与利率预期.md", "海外行情与历史财务扩展.md",
+                       "境内QDII与海外行情选择.md", "iFinD可选数据源.md"},
+    "quant-strategy-kit": {"使用指南.md", "默认示例说明.md", "配置与计算说明.md",
+                           "回测结果与报告接口.md", "风险平价与风险贡献.md"},
+    "quant-report-kit": {"使用指南.md", "投资回测报告规范.md", "接口与计算口径.md",
+                         "监管依据与适用范围.md"},
+    "quant-rebalance-kit": {"使用指南.md", "输入输出约定.md"},
+}
 
 
 def build(output):
@@ -25,6 +36,10 @@ def build(output):
             if f.is_symlink() or not f.is_file() or "__pycache__" in rel.parts:
                 continue
             if len(rel.parts)>1 and rel.parts[0] not in DIRECTORIES:
+                continue
+            if rel.parts[0] == "references" and (
+                len(rel.parts) != 2 or rel.name not in REFERENCE_FILES[root.name]
+            ):
                 continue
             if f.suffix not in SUFFIXES and f.name != ".gitignore":
                 continue

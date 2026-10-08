@@ -13,8 +13,5 @@
 | [SKILL.md](SKILL.md) | WorkBuddy等宿主的交流及调用流程 |
 | [使用指南](references/使用指南.md) | 人工复现命令、实际持仓确认及历史演示 |
 | [输入输出约定](references/输入输出约定.md) | 数据字段、时点、单位、日历及状态处理 |
-| [WorkBuddy开发指南](references/WorkBuddy开发指南.md) | 从需求、设计到编码和验证的独立开发过程 |
 
-四个kit保持同级目录，复用原环境；本模块依赖numpy、pandas和scipy，不增加vn.py、MCP或模型服务。数据、账户和输出存放在工作目录中，不放入kit，不生成ZIP。
-
-本项目已生成的历史验证入口：[组合调仓验证](../output/验证与测试/组合调仓验证_20261007/验证说明.md)。
+四个kit保持同级目录，复用原环境；本模块依赖numpy、pandas和scipy，不增加vn.py、MCP或模型服务。数据、账户和输出存放在工作目录中，不放入kit。

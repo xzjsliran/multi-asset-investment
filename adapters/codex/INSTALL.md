@@ -45,6 +45,6 @@ Python 需要 3.11 或 3.12。让 Codex 根据 Skill 内的 `references/codex-ru
 
 插件版本在 `.codex-plugin/plugin.json`。`bundle-manifest.json` 记录源码提交和逐文件 SHA-256；Release 的 `SHA256SUMS` 用于检查 ZIP 下载完整性。安装包不包含真实行情、账户、历史报告、环境或密钥。
 
-构建和离线测试可以验证安装包结构及计算功能。客户端插件列表、首次启用和实时数据权限仍以本机安装结果为准。
+实时数据范围取决于使用者的数据来源及账户权限。
 
 官方格式与安装说明：[OpenAI 插件打包文档](https://developers.openai.com/plugins/build/plugins)。

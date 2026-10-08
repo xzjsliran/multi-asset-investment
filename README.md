@@ -35,12 +35,12 @@ python multi-asset-investment/scripts/run.py startup
 
 Windows 使用 `py -3.11 -m venv .venv` 和 `.venv\Scripts\Activate.ps1`。直接海外证券或研究快照导入另装 `quant-data-kit/requirements-extended.txt`。启动检查不联网、不消耗数据额度，也不会输出密钥。
 
-可以先让 Agent 读取 `multi-asset-investment/SKILL.md`，确认年份、资产、配权和调仓频率，再生成配置和数据计划。市场数据、账户及报告保存在使用者工作目录。仓库未包含真实数据、密钥、虚拟环境或历史报告；旧验证记录中的本地路径仅用于原作者复核。
+可以先让 Agent 读取 `multi-asset-investment/SKILL.md`，确认年份、资产、配权和调仓频率，再生成配置和数据计划。市场数据、账户及报告保存在使用者工作目录。仓库未包含真实数据、密钥、虚拟环境或历史报告。
 
 ## 开发、适配与发布
 
 四个 kit 和统一入口各保留一份源码；平台差异放在 `adapters/`，安装包分别由 `scripts/build_codex_release.py`、`scripts/build_claude_code_release.py`、`scripts/build_workbuddy_release.py` 和 `scripts/build_dsh_release.py` 生成。当前提供 Codex、Claude Code、WorkBuddy 和 DeepSeek Harness（DSH）适配。
 
-版本号在 `VERSION`。源码、适配说明和构建脚本进入 Git；生成目录与 ZIP 放在本地 `output/`，上传至对应版本的 GitHub Release。维护步骤见[项目维护与发布](docs/项目维护与发布.md)，平台安装方法见上表。Claude Code、WorkBuddy 与 DSH 追加包固定复用核心标签 `v0.1.0`，适配层提交单独记入包内清单。
+版本号在 `VERSION`。源码、适配说明和构建脚本进入 Git；生成目录与 ZIP 放在本地 `output/`，上传至对应版本的 GitHub Release。维护步骤见[项目维护与发布](docs/项目维护与发布.md)，平台安装方法见上表。四个平台的当前发行版本为 `0.2.0`，使用同一核心源码提交，安装包清单记录对应提交。
 
-报告使用[投资回测报告规范](quant-report-kit/references/投资回测报告规范.md)；跨模块要求见[AGENTS.md](AGENTS.md)。学生从头开发的指南单独放在各模块 `references/` 中，客户报告和产品界面采用投资研究表达。
+报告使用[投资回测报告规范](quant-report-kit/references/投资回测报告规范.md)；跨模块要求见[AGENTS.md](AGENTS.md)。各模块 references 仅包含投资研究所需说明，客户报告和产品界面采用投资研究表达。
