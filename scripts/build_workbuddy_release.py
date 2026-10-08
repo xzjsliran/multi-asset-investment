@@ -82,10 +82,7 @@ def build(output, core_ref):
     })
     shutil.copy2(ADAPTER / "INSTALL.md", market / "INSTALL.md")
     status = {"target": "workbuddy", "version": version, "core_ref": core_ref,
-              "core_source_commit": core_commit, "adapter_source_commit": adapter_commit,
-              "automated_tests": "not_run", "workbuddy_plugin_validation": "not_run",
-              "workbuddy_installation": "not_run", "end_to_end": "not_run",
-              "note": "首次适配试用包，按维护者要求跳过验证，供使用者自行测试。"}
+              "core_source_commit": core_commit, "adapter_source_commit": adapter_commit}
     write_json(market / "bundle-manifest.json", {
         "schema_version": 1, **status, "files": file_hashes(market),
         "contains_market_data": False, "contains_credentials": False,

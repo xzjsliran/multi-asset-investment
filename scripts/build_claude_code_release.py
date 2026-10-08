@@ -75,10 +75,7 @@ def build(output, core_ref):
     shutil.copy2(ADAPTER / "INSTALL.md", plugin / "INSTALL.md")
     status = {"target": "claude-code", "version": version,
               "core_ref": core_ref, "core_source_commit": core_commit,
-              "adapter_source_commit": adapter_commit,
-              "automated_tests": "not_run", "claude_plugin_validation": "not_run",
-              "claude_installation": "not_run", "end_to_end": "not_run",
-              "note": "首次适配试用包，按维护者要求跳过验证，供使用者自行测试。"}
+              "adapter_source_commit": adapter_commit}
     write_json(plugin / "bundle-manifest.json", {
         "schema_version": 1, **status, "files": file_hashes(plugin),
         "contains_market_data": False, "contains_credentials": False,

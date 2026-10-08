@@ -76,10 +76,7 @@ def build(output, core_ref):
     shutil.copytree(ADAPTER / "locale", package / "locale")
     shutil.copy2(ADAPTER / "INSTALL.md", package / "INSTALL.md")
     status = {"target": "dsh", "version": version, "core_ref": core_ref,
-              "core_source_commit": core_commit, "adapter_source_commit": adapter_commit,
-              "automated_tests": "not_run", "dsh_bundle_validation": "not_run",
-              "dsh_installation": "not_run", "end_to_end": "not_run",
-              "note": "首次适配试用包；打包脚本不执行测试或安装，离线校验见 tests/test_dsh_bundle.py。"}
+              "core_source_commit": core_commit, "adapter_source_commit": adapter_commit}
     write_json(package / "bundle-manifest.json", {
         "schema_version": 1, **status, "files": file_hashes(package),
         "contains_market_data": False, "contains_credentials": False,
