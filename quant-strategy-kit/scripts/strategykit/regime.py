@@ -78,5 +78,5 @@ def allocation(config, events, signal, previous):
         if all_result is not False and any_result is not False and (all_result is None or any_result is None):
             chosen = previous if macro.get("missing", "base_weights") == "hold" else base
             return dict(chosen), {"state": "指标不足，沿用" + ("上期配置" if macro.get("missing") == "hold" else "基础配置"),
-                                  "inputs": inputs, "missing": True}
+                                  "inputs": inputs, "missing": True, "fallback": True}
     return base, {"state": "基础配置", "inputs": inputs, "missing": missing}

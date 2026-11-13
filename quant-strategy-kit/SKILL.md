@@ -28,8 +28,8 @@ description: 为商业客户的资产配置研究把用户的资产范围、选�
 2. `scripts/run.py init --preset cross-border-allocation --out <工作目录/strategy.json>`；修改副本。明确使用境内QDII版本时选 `qdii-equity-allocation`；境内多资产配置用 `domestic-allocation`；VIX动态参考用 `vix-dynamic-allocation`；风险平价参考用`risk-parity-allocation`。
 3. `scripts/run.py plan --config <配置> --out <工作目录/data-plan.json>` 查看数据需求。
 4. 已有第一部分结果可直接用于回测。缺数据时：`scripts/run.py prepare --config <配置> --data-kit <数据模块目录> --work <新工作目录>`。已有归档研究数据时可追加 `--research <归档研究目录>` 只读重建历史输入。历史财务选股需要本地Tushare权限；不可悄悄拿今天的财务或当前成分股回填历史。
-5. `scripts/run.py backtest --config <配置> --data <标准数据目录> --out <新结果目录>`。所有路径替换为实际绝对路径，固定使用同一个环境的Python。数据、缓存、结果都写工作目录，不写Skill目录。
-6. 读取 `handoff.json`、`checks.json`，核对 `optimization.json`、`regimes.json`及缺口记录；向用户给出数据目录与交接入口。默认计算仅将最小方差改为等权的对照，指标在comparison.json中。不在本模块生成图表、网页或策略表现报告。
+5. 通过统一插件执行研究时，先用 `research preview` 核对标准行情、日历和预热样本，再用 `research run`。独立模块仍可调用 `scripts/run.py backtest --config <配置> --data <标准数据目录> --out <新结果目录>@。数据、缓存和结果写入研究工作目录。
+6. 读取 `handoff.json` 的 `execution_review` 和 `checks.json`，核对 `optimization.json`、`regimes.json` 及缺口。全程回退时按实际路径解释。策略模块输出数据交给报告模块。内置对照与使用条件见回测结果接口。
 
 ## 解释结果时需知道
 

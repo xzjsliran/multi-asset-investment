@@ -14,6 +14,10 @@ sys.path.insert(0, str(ROOT/"quant-data-kit/scripts"))
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else "startup"
     args = sys.argv[2:]
+    if command == "research":
+        from research import main as research_main
+
+        return research_main(args, ROOT)
     routes = {"data":"quant-data-kit/scripts/run.py", "extend":"quant-data-kit/scripts/extend.py",
               "strategy":"quant-strategy-kit/scripts/run.py", "report":"quant-report-kit/scripts/run.py",
               "rebalance":"quant-rebalance-kit/scripts/run.py", "ifind":"quant-data-kit/scripts/ifind.py",
@@ -21,7 +25,7 @@ def main():
     if command in routes:
         return subprocess.run([sys.executable, str(ROOT/routes[command]), *args]).returncode
     if command not in {"startup","doctor","--help","help"}:
-        raise ValueError("未知入口。可用startup、doctor、credentials、data、extend、ifind、strategy、report、rebalance。")
+        raise ValueError("可用入口：startup、doctor、research、credentials、data、extend、ifind、strategy、report、rebalance。")
     from quantkit.credentials import status
     packages = {}
     for name in ["numpy","pandas","scipy","requests","akshare","tushare","yfinance","pyarrow"]:
@@ -44,5 +48,5 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (ValueError,RuntimeError) as exc:
+    except (ValueError, RuntimeError, OSError, KeyError) as exc:
         raise SystemExit(str(exc))

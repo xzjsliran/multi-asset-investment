@@ -115,6 +115,15 @@ def quality_value(features, signal, params):
     return selected
 
 
+def active_assets(sleeve, execute):
+    """按实际执行日判断已声明的证券生效区间。"""
+    return [
+        asset for asset in sleeve.get("assets", [])
+        if pd.Timestamp(asset.get("from", "1900-01-01")) <= execute
+        < pd.Timestamp(asset.get("until", "2200-01-01"))
+    ]
+
+
 def select_and_weight(sleeve, signal, execute, prices, features):
     selection, weighting = sleeve["selection"], sleeve["weighting"]
     notes, audit = [], {"sleeve": sleeve["id"], "signal_date": str(signal.date()),
@@ -124,9 +133,7 @@ def select_and_weight(sleeve, signal, execute, prices, features):
         chosen = quality_value(features, signal, selection)
         codes = chosen["code"].tolist()
     else:
-        codes = [a["code"] for a in sleeve["assets"]
-                 if pd.Timestamp(a.get("from", "1900-01-01")) <= execute
-                 and execute < pd.Timestamp(a.get("until", "2200-01-01"))]
+        codes = [asset["code"] for asset in active_assets(sleeve, execute)]
         chosen = pd.DataFrame({"code": codes})
         if selection["method"] == "momentum":
             lookback = int(selection.get("lookback", 126))

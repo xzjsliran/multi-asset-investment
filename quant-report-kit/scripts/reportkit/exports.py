@@ -11,6 +11,7 @@ import pandas as pd
 
 from .inputs import write_json
 from .reporting import client_text, validate_report
+from .evidence import contains_number, render_commentary
 
 
 def compact(value):
@@ -20,25 +21,33 @@ def compact(value):
 def add_commentary(data, value=None):
     if value is not None and not isinstance(value, dict):
         raise ValueError("解读文件需要JSON对象。")
-    blocks = [] if value is None else value.get("sections", [])
-    if not isinstance(blocks, list):
+    inputs = [] if value is None else value.get("sections", [])
+    if not isinstance(inputs, list):
         raise ValueError("解读文件需要sections数组。")
     known = {f["id"] for f in data["facts"]}
-    for block in blocks:
+    blocks = []
+    for block in inputs:
         if not isinstance(block, dict) or not all(isinstance(block.get(k), str) and block[k].strip() for k in ("title", "text")):
             raise ValueError("每段解读需要title和text。")
         ids = block.get("evidence_ids", [])
-        if not isinstance(ids, list) or not ids or any(i not in known for i in ids):
+        if not isinstance(ids, list) or not ids or any(not isinstance(i, str) or i not in known for i in ids):
             raise ValueError("每段解读的evidence_ids须引用本次facts中存在的事实编号。")
         client_text(block["title"], "解读标题", heading=True)
+        if contains_number(block["title"]):
+            raise ValueError("研究解读标题须使用定性表述，关键数字由 claims 引用。")
         client_text(block["text"], "解读正文")
-        block.setdefault("section", "comparison")
-        if block["section"] not in {"summary", "comparison", "portfolio"}:
+        section = block.get("section", "comparison")
+        if section not in {"summary", "comparison", "portfolio"}:
             raise ValueError("解读section须为summary/comparison/portfolio。")
+        claims = block.get("claims", [])
+        text = render_commentary(data, block["text"], claims, ids)
+        blocks.append({"section": section, "title": block["title"], "text": text,
+                       "interpretation": block["text"], "claims": claims, "evidence_ids": ids})
     data["commentary"] = blocks
     summary = [b for b in blocks if b["section"] == "summary"]
     if summary:
-        data["summary"] = summary
+        data["summary"] = [*data.get("execution_findings", []), *summary]
+        data["lead"] = data["summary"][0]["text"]
     return data
 
 
@@ -110,6 +119,12 @@ def render_html(snapshot, template_path):
     raw = compact(snapshot)
     payload = raw.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     rendered = template.replace(marker, payload)
+    # 同一字体声明覆盖正文、控件和图表文字，中文字符回退到宋体。
+    typography = (
+        '<style>.qr-report, .qr-report button, .qr-report input, .qr-report select, '
+        '.qr-report svg text {font-family: "Times New Roman", "SimSun", "宋体", serif;}</style>'
+    )
+    rendered = rendered.replace("</head>", typography + "</head>", 1)
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
     rendered = re.sub(r'(<meta\s+name="data-app-snapshot-sha256"\s+content=")[^"]*("\s*/?>)', lambda m: m[1]+digest+m[2], rendered)
     rendered = re.sub(r"<title>.*?</title>", lambda _: "<title>"+html.escape(snapshot["title"])+"</title>", rendered, count=1, flags=re.S)
@@ -215,8 +230,16 @@ def export_report(data, config, out, template):
     context = {k: data[k] for k in ["schema_version", "title", "period", "lead", "facts", "pairs", "scope_notes", "methods", "report", "template", "overview", "assumptions", "execution_notes", "disclosures"]}
     context["strategies"] = [{"id": s["id"], "label": s["label"], "metrics": s["metrics"], "rules": s["detail"]["rules"],
         "contributions": s["detail"]["contributions"], "risk":s["detail"]["risk"], "regimes": s["detail"]["regimes"], "diagnostics": s["detail"]["diagnostics"],
-        "source_notes": s["detail"]["source_notes"], "notices": s["detail"]["notices"]} for s in data["strategies"]]
-    context["writing_instructions"] = "按investment_backtest_v2模板面向商业客户撰写投资回测研究。标题采用专业主题或有数据支持的结论，禁用设问、读图指令及内部代称。输出sections，每项含section(summary/comparison/portfolio)、title、text、evidence_ids。优先解释风险收益权衡、比较条件和适用范围，避免重复报数。只能引用本次事实；核对每个数字和推断。横向方案差异不直接归因于单个指标；不补造机构、资质、实盘业绩、样本外检验和未来收益。机构披露只使用用户确认的信息。程序只检查引用与内容格式，语义和机构发布要求须另行核实。"
+        "source_notes": s["detail"]["source_notes"], "notices": s["detail"]["notices"],
+        "execution_review": s["execution_review"]} for s in data["strategies"]]
+    context["evidence_values"] = data["evidence_values"]
+    context["execution_findings"] = data["execution_findings"]
+    context["writing_instructions"] = (
+        "按本次事实撰写解读。每段提供 section、title、text、evidence_ids，可选 claims。"
+        "正文 text 只写定性解释，数值以 evidence_values 的键写入 claims，由程序生成完整陈述。"
+        "引用数值的 fact_id 必须在本段 evidence_ids 中。先解释执行限制，再讨论收益和风险。"
+        "横向方案差异只说明整体差异。判断和机构发布仍需另行复核。"
+    )
     write_json(out/"ai_context.json", context)
     for key in ["curves", "monthly", "annual"]:
         pd.DataFrame(data[key]).to_csv(out/f"{key}.csv", index=False, encoding="utf-8-sig")

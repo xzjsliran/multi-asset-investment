@@ -10,7 +10,7 @@ KITS = ["quant-data-kit","quant-strategy-kit","quant-report-kit","quant-rebalanc
 SUFFIXES = {".py",".md",".json",".jsx",".css",".html",".txt",".yaml"}
 DIRECTORIES = {"scripts","references","assets","templates","examples","agents"}
 REFERENCE_FILES = {
-    "multi-asset-investment": {"使用指南.md"},
+    "multi-asset-investment": {"使用指南.md", "研究任务操作.md"},
     "quant-data-kit": {"使用指南.md", "安装来源.md", "数据接口与口径.md",
                        "美国宏观与利率预期.md", "海外行情与历史财务扩展.md",
                        "境内QDII与海外行情选择.md", "iFinD可选数据源.md"},

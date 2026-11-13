@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from .inputs import records
+from .evidence import METRICS, add_value
 from .reporting import public_runs, decorate
 from .long_only import check_long_only
 
@@ -197,6 +198,51 @@ def detail(run, selected, metrics, start, end):
     return out
 
 
+def execution_review(run, regimes, start):
+    """以实际决策记录判断报告区间的动态配置证据是否充分。"""
+    if run.scenario != "strategy":
+        return None
+    if run.config.get("allocation", {}).get("method") == "risk_parity":
+        method = "风险平价"
+        def fell_back(row):
+            return row.get("status") != "success"
+    elif run.config.get("macro", {}).get("enabled"):
+        method = "宏观条件配置"
+        def fell_back(row):
+            return row.get("fallback", row.get("state", "").startswith("指标不足，沿用"))
+    else:
+        return None
+    label = run.label
+    prior = [
+        row for row in run.documents.get("regimes", [])
+        if row.get("execution_date", "") < str(start.date())
+    ]
+    earlier_success = any(not fell_back(row) for row in prior)
+    fallback = [row for row in regimes if fell_back(row)]
+    if not regimes:
+        text = f"{label}在报告区间没有新的{method}决策记录。区间绩效沿用原回测路径。"
+        if prior and not earlier_success:
+            return {"status": "method_not_evaluated", "text": text + f"此前均采用回退配置，无法评价{method}。"}
+        return {"status": "no_decisions", "text": text}
+    if not fallback:
+        return {"status": "ready"}
+    status = "limited"
+    text = f"{label}在报告区间的{len(regimes)}次配置决策中有{len(fallback)}次采用回退配置。"
+    if len(fallback) < len(regimes):
+        text += f"区间绩效同时包含{method}与回退配置。"
+    elif not earlier_success:
+        status = "method_not_evaluated"
+        text += f"该区间没有成功执行{method}决策，无法评价该方法。展示的是回退配置的历史表现。"
+    else:
+        text += f"本区间没有新的{method}决策成功，区间起点沿用此前持仓。"
+    reasons = sorted({
+        (row.get("reason") or row.get("state", "缺少所需数据")).rstrip("。")
+        for row in fallback
+    })
+    text += "回退原因包括" + "、".join(reasons) + "。"
+    return {"status": status, "text": text, "events": len(regimes), "fallback": len(fallback)}
+
+
 def analyse(config, runs):
     for run in runs:
         check_long_only(run)
@@ -218,6 +264,7 @@ def analyse(config, runs):
             "period": {"start": str(start.date()), "end": str(end.date()), "observations": len(dates),
                        "currency": runs[0].currency, "anchor": "共同起始日收盘净值归一为1；起始日之前及当日已发生的收益不计入比较"},
             "strategies": [], "curves": [], "monthly": [], "annual": [], "pairs": [], "facts": [],
+            "evidence_values": {}, "execution_findings": [],
             "methods": {"annualization_days": 252, "cagr": "按首末日期之间天数/365.25折算", "risk_free_rate": 0,
                         "return_units": "decimal", "comparison": "按共同估值日期重算绩效，延续各策略原始持仓及调仓路径"},
             "input_fingerprints": {r.id: r.hashes for r in runs}}
@@ -226,32 +273,71 @@ def analyse(config, runs):
     def fact(text, strategy_ids, sources):
         nonlocal fact_no
         fact_no += 1
-        data["facts"].append({"id": f"F{fact_no:03d}", "text": text, "strategies": strategy_ids, "evidence": sources})
+        fact_id = f"F{fact_no:03d}"
+        data["facts"].append({"id": fact_id, "text": text, "strategies": strategy_ids, "evidence": sources})
+        return fact_id
 
     for run, selected in zip(runs, selections):
         d, m = performance(selected)
         _, original = performance(run.daily)
-        item = {"id": run.id, "label": run.label, "scenario": run.scenario, "metrics": m, "original_metrics": original,
+        details = detail(run, selected, m, start, end)
+        review = execution_review(run, details["regimes"], start)
+        label = run.label
+        if review and review["status"] == "method_not_evaluated":
+            label += "（回退配置）"
+        item = {"id": run.id, "label": label, "scenario": run.scenario, "metrics": m, "original_metrics": original,
                 "currency": run.currency, "initial_capital": run.handoff.get("initial_capital"),
                 "source": {"directory": str(run.path), "daily_file": SCENARIO_FILE(run), "price_digest": run.documents.get("manifest", {}).get("price_digest")},
-                "config": run.config, "detail": detail(run, selected, m, start, end)}
+                "config": run.config, "detail": details, "execution_review": review}
         data["strategies"].append(item)
         for row in records(d):
-            row.update(strategy_id=run.id, strategy=run.label)
+            row.update(strategy_id=run.id, strategy=label)
             row["date"] = row["date"][:10]
             data["curves"].append(row)
         for key, freq in [("monthly", "M"), ("annual", "Y")]:
-            data[key] += [{"strategy_id": run.id, "strategy": run.label, **row} for row in period_table(d, freq)]
-        fact(f"{run.label}在共同区间累计收益{m['total_return']:.2%}，年化波动{m['annual_volatility']:.2%}，最大回撤{m['max_drawdown']:.2%}。", [run.id], ["metrics", "curves"])
+            data[key] += [{"strategy_id": run.id, "strategy": label, **row} for row in period_table(d, freq)]
+        metric_fact = fact(
+            f"{label}在共同区间累计收益{m['total_return']:.2%}，"
+            f"年化波动{m['annual_volatility']:.2%}，最大回撤{m['max_drawdown']:.2%}。",
+            [run.id], ["metrics", "curves"],
+        )
+        for key, metric in METRICS.items():
+            unit = "ratio" if key == "sharpe_zero_rf" else "percent"
+            add_value(data, f"metric.{run.id}.{key}", metric, m[key], unit, [run.id], label, metric_fact)
+        if review and review["status"] != "ready":
+            text = review["text"]
+            fact_id = fact(text, [run.id], ["detail.regimes", "execution_review"])
+            data["execution_findings"].append({"text": text, "evidence_ids": [fact_id]})
+        if run.scenario == "strategy":
+            omitted = run.handoff.get("diagnostics", {}).get("omitted_comparisons", [])
+            for comparison in omitted:
+                if comparison.get("scenario") == "benchmark":
+                    text = f"{label}的市场基准缺少完整行情，本次未列入对照。"
+                    fact_id = fact(text, [run.id], ["handoff.diagnostics.omitted_comparisons"])
+                    data["execution_findings"].append({"text": text, "evidence_ids": [fact_id]})
         contrib = item["detail"]["contributions"]
         risk = item["detail"]["risk"]
         if risk["status"] == "ok":
             largest = max(risk["rows"], key=lambda x:x["risk_share"])
-            fact(f"{run.label}的{largest['name']}风险贡献占比最高，为{largest['risk_share']:.2%}；各部分波动贡献之和为组合年化波动率{risk['annual_volatility']:.2%}。", [run.id], ["detail.risk", "metrics.annual_volatility"])
+            risk_fact = fact(
+                f"{label}的{largest['name']}风险贡献占比最高，为{largest['risk_share']:.2%}。"
+                f"各部分波动贡献之和为组合年化波动率{risk['annual_volatility']:.2%}。",
+                [run.id], ["detail.risk", "metrics.annual_volatility"],
+            )
+            for row in risk["rows"]:
+                add_value(data, f"risk.{run.id}.{row['sleeve']}", "风险贡献占比",
+                          row["risk_share"], "percent", [run.id], f"{label}的{row['name']}", risk_fact)
         if contrib:
             best = contrib[0]
             wording = "贡献最高" if best["contribution"] >= 0 else "拖累最小"
-            fact(f"{run.label}中，{best['name']}{wording}，贡献{best['contribution']*100:+.2f}个百分点；各部分贡献合计{sum(x['contribution'] for x in contrib)*100:+.2f}个百分点。", [run.id], ["detail.contributions", "metrics.total_return"])
+            contrib_fact = fact(
+                f"{label}中，{best['name']}{wording}，贡献{best['contribution']*100:+.2f}个百分点。"
+                f"各部分贡献合计{sum(x['contribution'] for x in contrib)*100:+.2f}个百分点。",
+                [run.id], ["detail.contributions", "metrics.total_return"],
+            )
+            for row in contrib:
+                add_value(data, f"contribution.{run.id}.{row['sleeve']}", "收益贡献",
+                          row["contribution"], "percentage_point", [run.id], f"{label}的{row['name']}", contrib_fact)
         regimes = item["detail"]["regimes"]
         if run.config.get("macro", {}).get("enabled") and regimes:
             counts = pd.Series([x.get("state", "未标注") for x in regimes]).value_counts().to_dict()
@@ -271,16 +357,15 @@ def analyse(config, runs):
         delta = pair["deltas"]
         def difference(v):
             return "不足0.01" if 0 < abs(v*100) < .005 else f"{v*100:+.2f}"
-        fact(f"相对{a.label}，{b.label}的累计收益相差{difference(delta['total_return'])}个百分点，年化波动相差{difference(delta['annual_volatility'])}个百分点，最大回撤数值相差{difference(delta['max_drawdown'])}个百分点（正值表示回撤较浅）。", [a.id,b.id], ["pairs.deltas", "pairs.rule_differences", "source.price_digest"])
-    if len(runs)>1:
-        high = max(data["strategies"],key=lambda s:s["metrics"]["total_return"])
-        low = max(data["strategies"],key=lambda s:s["metrics"]["max_drawdown"])
-        if high["id"] == low["id"]:
-            data["lead"] = f"共同区间内，{high['label']}同时取得了最高累计收益和最浅最大回撤。"
-        else:
-            data["lead"] = f"共同区间内，{high['label']}累计收益最高，{low['label']}最大回撤最浅。"
-    else:
-        data["lead"] = data["facts"][0]["text"]
+        pair_fact = fact(
+            f"相对{x['label']}，{y['label']}的累计收益相差{difference(delta['total_return'])}个百分点，"
+            f"年化波动相差{difference(delta['annual_volatility'])}个百分点，"
+            f"最大回撤数值相差{difference(delta['max_drawdown'])}个百分点（正值表示回撤较浅）。",
+            [a.id, b.id], ["pairs.deltas", "pairs.rule_differences", "source.price_digest"],
+        )
+        for key, value in delta.items():
+            add_value(data, f"delta.{a.id}.{b.id}.{key}", METRICS[key] + "差值",
+                      value, "percentage_point", [a.id, b.id], f"{y['label']}相对{x['label']}的", pair_fact)
     data["scope_notes"] = []
     if any(r.daily["date"].iloc[0]!=start or r.daily["date"].iloc[-1]!=end for r in runs):
         data["scope_notes"].append("各策略原始日期范围不同或本次指定了子区间；主图和指标统一按共同区间重算，各自全区间结果另列。")

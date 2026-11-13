@@ -74,11 +74,34 @@ class Reporting(unittest.TestCase):
 
     def test_structured_summary_shared_by_outputs(self):
         d=analyse({},[run_fixture()])
-        add_commentary(d,{'sections':[{'section':'summary','title':'收益与回撤特征','text':'累计收益18.80%，最大回撤-10.00%。','evidence_ids':['F001']}]})
+        add_commentary(d, {"sections": [{
+            "section": "summary",
+            "title": "收益与回撤特征",
+            "text": "样本区间内曾出现回撤。",
+            "claims": ["metric.a.total_return", "metric.a.max_drawdown"],
+            "evidence_ids": ["F001"],
+        }]})
+        self.assertIn("18.80%", d["summary"][0]["text"])
+        self.assertIn("-10.00%", d["summary"][0]["text"])
         self.assertEqual(make_snapshot(d)['quantReport']['summary'],d['summary'])
         self.assertIn(d['summary'][0]['text'],markdown_report(d))
         d['commentary'][0]['evidence_ids']=['F999']
         with self.assertRaisesRegex(ValueError,'事实编号'):validate_report(d)
+
+    def test_wrong_number_with_a_real_fact_id_is_rejected(self):
+        d = analyse({}, [run_fixture()])
+        with self.assertRaisesRegex(ValueError, "claims"):
+            add_commentary(d, {"sections": [{
+                "title": "收益表现", "text": "累计收益为99.00%。", "evidence_ids": ["F001"],
+            }]})
+
+    def test_claim_must_match_strategy_and_fact(self):
+        d = analyse({}, [run_fixture(), run_fixture("b")])
+        with self.assertRaisesRegex(ValueError, "不在本次解读"):
+            add_commentary(d, {"sections": [{
+                "title": "收益表现", "text": "关注收益和风险。",
+                "claims": ["metric.b.total_return"], "evidence_ids": ["F001"],
+            }]})
 
     def test_missing_required_disclosure_rejected(self):
         d=analyse({},[run_fixture()]);d['disclosures']=[x for x in d['disclosures'] if x['id']!='historical']

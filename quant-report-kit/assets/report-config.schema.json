@@ -10,6 +10,9 @@
     "alignment":{"const":"common"},
     "start":{"type":"string","format":"date"},
     "end":{"type":"string","format":"date"},
+    "metrics":{"type":"array","minItems":1,"uniqueItems":true,"items":{
+      "enum":["total_return","annual_return","annual_volatility","max_drawdown","sharpe_zero_rf"]
+    }},
     "report":{
       "type":"object","additionalProperties":false,
       "properties":{

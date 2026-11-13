@@ -1,8 +1,8 @@
 """将策略的数据需求交给第一部分；联网获取方法全部留在 quant-data-kit。"""
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
+import shutil
 import sys
 
 import pandas as pd
@@ -38,6 +38,8 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
         raise ValueError("该目录已有数据，请选择新的 work 目录；cache 可由用户复用。")
     out.mkdir(exist_ok=True)
     plan = data_plan(config)
+    if research and plan["macro"] and not macro_data:
+        raise ValueError("research 原始快照没有本次宏观指标。请提供 macro_data，或通过数据模块补取后再跑。")
     start = (pd.Timestamp(config["start"]) - pd.Timedelta(days=plan["lookback_days"])).strftime("%Y-%m-%d")
     cache = Path(cache).resolve() if cache else work / "cache"
     client = Client(cache, timeout=120)
@@ -52,6 +54,7 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
         if sleeve["selection"]["method"] in {"quality_value", "fundamental"}:
             dates.update(schedule(cal["date"], config["start"], config["end"], sleeve["rebalance"]).values())
     features = pd.DataFrame()
+    domestic_quality = None
     assets = {a["code"]: a for a in plan["assets"]}
     if dates:
         if provider == "free" and not research:
@@ -67,8 +70,6 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
     if research:
         prices = research_prices(research, list(assets.values()), cal)
         prices.to_csv(out / "prices.csv", index=False, encoding="utf-8-sig")
-        if plan["macro"] and not macro_data:
-            raise ValueError("research 原始快照没有本次宏观指标。请提供 macro_data，或通过数据模块补取后再跑。")
     else:
         domestic = [a for a in assets.values() if a["kind"] != "us_etf"]
         if not domestic:
@@ -77,14 +78,16 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
             if plan["macro"]:
                 from quantkit.pipeline import get_macro
                 cfg = {"macro": plan["macro"], "provider": provider, "nbs_urls": [], "nbs_crawl_pages": 0}
-                events, failures, status = get_macro(client, cfg, start, config["end"])
+                events, _, _ = get_macro(client, cfg, start, config["end"])
                 events.to_csv(out / "macro_observations.csv", index=False, encoding="utf-8-sig")
         else:
             request = {"start": config["start"], "end": config["end"], "lookback_days": plan["lookback_days"],
                        "assets": domestic, "macro": plan["macro"], "provider": provider, "nbs_urls": [], "nbs_crawl_pages": 0}
             write_json(work / "data-request.json", request)
             # 第一部分会创建自己的目录，因此先写入独立目录再读取合并。
-            download(work / "data-request.json", work / "domestic", cache)
+            domestic_quality = download(work / "data-request.json", work / "domestic", cache)
+            # 标准行情和质量记录一同交给回测前检查。
+            shutil.copy2(work / "domestic/quality.json", out / "quality.json")
             prices = pd.read_csv(work / "domestic/prices.csv")
             macro_file = work / "domestic/macro_observations.csv"
             if macro_file.exists():
@@ -104,5 +107,6 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
     write_json(out / "strategy_data_manifest.json", {"created_at": now(), "source": str(Path(research).resolve()) if research else "quant-data-kit",
         "start_with_warmup": start, "end": config["end"], "assets": list(assets.values()), "rows": len(prices),
         "us_alignment": "已完成纽约收盘和已知汇率向后对齐到中国交易日16时；调仓采用该已知报价的低频近似。",
-        "feature_dates": [str(x.date()) for x in sorted(dates)], "requests": client.log})
+        "feature_dates": [str(x.date()) for x in sorted(dates)], "requests": client.log,
+        "domestic_status": domestic_quality["status"] if domestic_quality else None})
     return out

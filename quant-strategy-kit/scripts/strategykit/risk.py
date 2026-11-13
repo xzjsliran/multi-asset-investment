@@ -42,6 +42,23 @@ def equal_risk_weights(covariance):
     return w
 
 
+def proxy_codes(settings):
+    """零权重代理不进入共同样本。"""
+    return list(dict.fromkeys(
+        asset["code"] for basket in settings["proxies"].values() for asset in basket
+        if asset.get("weight", 1) > 0
+    ))
+
+
+def proxy_returns(settings, prices, signal):
+    """以信号日为最后一日，仅统计真实共同收益。"""
+    window = prices.loc[:signal].tail(settings["lookback"] + 1)
+    history = window.reindex(columns=proxy_codes(settings))
+    returns = history.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan).dropna()
+    has_signal_prices = len(history) >= 2 and history.iloc[-1].notna().all()
+    return returns, has_signal_prices
+
+
 def allocate_risk(config, prices, signal, previous):
     settings = config["allocation"]
     ids = [s["id"] for s in config["sleeves"]]
@@ -52,11 +69,9 @@ def allocate_risk(config, prices, signal, previous):
             "invested_weight": settings["invested_weight"], "observations": 0}
     try:
         # 每个代理篮子的成员事先配置；历史估计不用事后选中的股票冒充历史持仓。
-        codes = list(dict.fromkeys(a["code"] for sid in ids for a in settings["proxies"][sid] if a.get("weight", 1) > 0))
-        history = prices.loc[:signal].reindex(columns=codes).tail(settings["lookback"] + 1)
-        if len(history) < 2 or not history.iloc[-1].notna().all():
+        returns, has_signal_prices = proxy_returns(settings, prices, signal)
+        if not has_signal_prices:
             raise ValueError("信号日风险代理行情缺失。")
-        returns = history.pct_change(fill_method=None).replace([np.inf, -np.inf], np.nan).dropna()
         info["observations"] = len(returns)
         if len(returns) < settings["min_observations"]:
             raise ValueError("风险代理共同有效样本不足。")

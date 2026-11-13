@@ -10,6 +10,7 @@ import pandas as pd
 
 from reportkit.inputs import SCENARIOS, load_request, load_run, read_json, validate_daily, write_json
 from reportkit.analysis import analyse
+from reportkit.evidence import METRICS
 from reportkit.exports import add_commentary, export_report
 from reportkit.reporting import default_name, INTERNAL, validate_artifact
 
@@ -41,6 +42,8 @@ def single_config(args):
         c["report"] = read_json(args.metadata)
     if args.start: c["start"]=args.start
     if args.end: c["end"]=args.end
+    if args.metrics:
+        c["metrics"] = args.metrics
     return c, [load_run(spec, path.parent) for spec in c["strategies"]]
 
 
@@ -69,6 +72,7 @@ def main():
     p.add_argument("--result", required=True); p.add_argument("--out", required=True)
     p.add_argument("--name"); p.add_argument("--title"); p.add_argument("--start"); p.add_argument("--end")
     p.add_argument("--main-only", action="store_true"); p.add_argument("--commentary")
+    p.add_argument("--metrics", nargs="+", choices=list(METRICS), help="在摘要中优先列示的指标")
     p.add_argument("--metadata", help="报告机构、署名、版本等实际元信息JSON，可选")
     p = sub.add_parser("build", help="按JSON配置比较任意多个结果")
     p.add_argument("--config", required=True); p.add_argument("--out", required=True); p.add_argument("--commentary")

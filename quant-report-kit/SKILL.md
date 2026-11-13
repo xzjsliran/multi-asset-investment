@@ -34,7 +34,7 @@ description: 面向商业客户生成专业投资策略回测研究报告。读�
 2. `scripts/run.py inspect --result <结果目录>`检查可用场景。
 3. 单结果使用`single --result <目录> --name <专业名称> --out <新目录>`；多策略使用`build --config <配置.json> --out <新目录>`。命令前使用实际Python路径。
 4. 读取`checks.json`、`comparison.csv`、`ai_context.json`，核对共同区间、基准、成本和数据限制。
-5. 需要补充研究分析时，根据本次事实生成解读JSON。每段包括`section`（summary/comparison/portfolio）、`title`、`text`、`evidence_ids`；标题使用研究主题或支持得出的结论。每个数字、方向、比较条件及推断逐项对照输入，不能只附事实编号。
+5. 需要补充研究分析时，根据本次事实生成解读 JSON。每段提供 `section`、`title`、`text`、`evidence_ids`，可加 `claims` 引用 `evidence_values`。程序填写策略、区间、数值和单位。标题和正文使用定性表述，含义、方向和比较条件由宿主复核。摘要先保留执行限制。
 6. 使用相同报告配置及`--commentary <解读.json>`写入新版本。执行`check --report-dir <报告目录>`，再实际打开HTML，检查曲线、名称、切换后的明细和披露。
 7. 向用户交付报告及必要结论。保留复核资料，不把文件指纹、原目录路径和代码字段堆入客户正文。
 

@@ -9,6 +9,8 @@ import json
 from pathlib import Path
 import re
 
+from .evidence import METRICS, contains_number, render_commentary
+
 TEMPLATE = Path(__file__).resolve().parents[2] / "assets/investment-report-template.json"
 INTERNAL = re.compile(r"朋友示例|朋友组合|朋友原例|教学|课堂|练习|老师|学生|试跑|(?<![a-z])(?:demo|friend|classroom|teacher|student)(?![a-z])", re.I)
 PROMISE = re.compile(r"稳赚|保本保收益|保证盈利|保证收益|必然盈利|无风险获利|零风险投资|稳赚不赔")
@@ -141,9 +143,15 @@ def decorate(data, config):
         # 仅同一回测导出的配套场景具有已知的受控变更。价格指纹相同本身不足以识别因果。
         same_run = a["source"]["directory"] == b["source"]["directory"]
         scenarios = {a["scenario"], b["scenario"]}
-        if same_run and pair["same_price_inputs"] and scenarios == {"strategy", "static"}:
+        execution = [s["execution_review"] for s in (a, b) if s.get("execution_review")]
+        if any(item["status"] == "method_not_evaluated" for item in execution):
+            pair["comparison_type"] = "回退配置比较"
+            pair["interpretation"] = "表中差异描述实际运行的历史路径。本区间缺少成功的配置决策，无法评价原配置方法。"
+        elif same_run and pair["same_price_inputs"] and scenarios == {"strategy", "static"}:
             pair["comparison_type"] = "动态权重对照"
             pair["interpretation"] = "同一回测输入及调仓日历下，将动态大类配权替换为基础权重。差异用于评价本区间大类配权方法的回测影响。"
+            if any(item["status"] != "ready" for item in execution):
+                pair["interpretation"] = "差异反映两条实际运行路径，其中动态方案包含回退配置或沿用的历史仓位。"
         elif same_run and pair["same_price_inputs"] and scenarios == {"strategy", "equal_weight"}:
             pair["comparison_type"] = "组合内配权对照"
             pair["interpretation"] = "同一回测输入下，将原采用最小方差的资产组合改为等权。其他资产组合维持原配权规则。"
@@ -154,8 +162,19 @@ def decorate(data, config):
             pair["comparison_type"] = "策略横向比较"
             pair["interpretation"] = "比较反映所列资产、权重、选股和调仓等全部差异的综合结果；单项规则的影响需通过其余条件相同的对照评价。"
 
-    findings = []
-    if len(data["strategies"]) == 1:
+    findings = list(data.get("execution_findings", []))
+    focus = config.get("metrics", [])
+    if not isinstance(focus, list) or any(not isinstance(key, str) or key not in METRICS for key in focus):
+        raise ValueError("报告摘要指标须从支持的指标列表中选择。")
+    if focus:
+        for strategy in data["strategies"]:
+            for metric in focus:
+                evidence = data["evidence_values"].get(f"metric.{strategy['id']}.{metric}")
+                if evidence:
+                    findings.append(paragraph(evidence["text"], [evidence["fact_id"]]))
+        if len(findings) == len(data.get("execution_findings", [])):
+            findings.append(paragraph("本区间缺少计算所选指标所需的有效数据。", []))
+    elif len(data["strategies"]) == 1:
         findings.append(paragraph(data["facts"][0]["text"], [data["facts"][0]["id"]]))
     else:
         # 摘要涵盖比较集合和风险，不将历史排序改写为投资推荐。
@@ -210,12 +229,21 @@ def validate_report(data):
         client_text(b["text"], "研究解读")
         if not b.get("evidence_ids") or not set(b["evidence_ids"]) <= {f["id"] for f in data["facts"]}:
             raise ValueError("研究解读引用了不存在的事实编号。")
+        if "evidence_values" in data:
+            if contains_number(b["title"]):
+                raise ValueError("研究解读标题须使用定性表述。")
+            expected = render_commentary(data, b.get("interpretation"), b.get("claims", []), b["evidence_ids"])
+            if b["text"] != expected:
+                raise ValueError("研究解读中的数字与本次计算证据不一致。")
+    if data.get("execution_findings") and data["summary"][:len(data["execution_findings"])] != data["execution_findings"]:
+        raise ValueError("研究摘要缺少实际执行的限制说明。")
     required = {"historical", "costs", "model", "holdings", "long_only"}
     if not required <= {x["id"] for x in data["disclosures"]}:
         raise ValueError("报告缺少必需的回测说明。")
     missing = [k for k in ("issuer", "author", "reviewer", "conflicts_disclosure") if not data["report"].get(k)]
     return {"template_id":data["template"]["id"], "content_checks":"passed", "required_disclosures":sorted(required),
         "internal_names_in_client_text":False, "commentary_evidence_ids":"checked",
+        "commentary_numeric_values": "structured" if "evidence_values" in data else "legacy",
         "commentary_semantics":"agent_review_required" if data.get("commentary") else "deterministic_facts",
         "unprovided_institutional_fields":missing,
         "institutional_review":"not_recorded", "legal_compliance_certification":False,

@@ -1,4 +1,4 @@
-"""计算并导出结果数据。报告组读取这些文件，自行设计图表和文字。"""
+"""计算并导出账户记录、对照结果和供报告使用的执行诊断。"""
 from __future__ import annotations
 
 import copy
@@ -12,7 +12,7 @@ from .config import all_assets, write_json, validate
 from .engine import backtest
 
 
-# 即使本次没有成交、选股或缺口，下一组也能按固定表头读取。
+# 即使本次没有成交、选股或缺口，也保留固定表头供报告读取。
 TABLE_COLUMNS = {
     "daily": ["date", "nav", "equity", "return", "cash_weight", "drawdown"],
     "weights": ["date", "sleeve", "code", "value", "weight"],
@@ -34,6 +34,37 @@ def metrics(daily):
             "annual_volatility": vol, "max_drawdown": float(daily["drawdown"].min()),
             "sharpe_zero_rf": float(r.mean() * 252 / vol) if vol > 1e-12 else None,
             "final_equity": float(daily["equity"].iloc[-1]), "trading_days": len(daily)}
+
+
+def review_execution(config, result, checks, omitted):
+    """区分回测运行成功与所要求的方法实际得到检验。"""
+    regimes = result["regimes"]
+    if config["allocation"]["method"] == "risk_parity":
+        method = "risk_parity"
+        fallback = [row for row in regimes if row["status"] != "success"]
+    elif config["macro"]["enabled"]:
+        method = "macro"
+        fallback = [row for row in regimes if row.get("fallback")]
+    else:
+        method, fallback = "fixed", []
+    if fallback and len(fallback) == len(regimes):
+        status = "method_not_evaluated"
+    elif fallback or omitted or any(checks[key] for key in (
+        "fallback_equal_count", "blocked_attempts", "long_valuation_gap_rows", "missing_macro_count"
+    )):
+        status = "limited"
+    else:
+        status = "ready"
+    reasons = sorted({row.get("reason") or row.get("state", "缺少所需数据") for row in fallback})
+    return {
+        "status": status,
+        "allocation_method": method,
+        "decision_events": len(regimes),
+        "fallback_events": len(fallback),
+        "fallback_reasons": reasons,
+        "fallback_dates": [row["execution_date"] for row in fallback],
+        "missing_comparisons": omitted,
+    }
 
 
 def export_results(config, data, out, compare_equal=True):
@@ -125,6 +156,7 @@ def export_results(config, data, out, compare_equal=True):
               "negative_target_rows": int(result["targets"]["target_value"].lt(0).sum()),
               "minimum_cash_weight": float(daily["cash_weight"].min())}
     save_json("checks.json", checks, "资金、时序及数据缺口核对")
+    execution = review_execution(config, result, checks, omitted)
     notes = ["所有资产只做多；目标权重及持仓非负，不使用融资杠杆。", "交易成本和现金收益均为零，允许分数份额。",
              "信号日收盘形成规则，下一中国交易日收盘记账；当日收益先归旧持仓，再调仓。",
              "复权单位用于收益记账；未完整模拟涨跌停和整手成交。",
@@ -151,5 +183,6 @@ def export_results(config, data, out, compare_equal=True):
                         "missing_json": "null", "missing_csv": "empty_cell", "csv_encoding": "utf-8-sig"},
         "scenarios": [{"id": row["scenario"], "label": row["label"]} for row in comparison],
         "diagnostics": {**checks, "unfilled_at_end": result["unfilled_at_end"], "omitted_comparisons": omitted},
+        "execution_review": execution,
         "files": files})
     return summary, checks

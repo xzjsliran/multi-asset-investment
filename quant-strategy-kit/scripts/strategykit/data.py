@@ -55,7 +55,7 @@ class Dataset:
         cal = pd.read_csv(root / "calendar.csv")
         dates = pd.DatetimeIndex(date_series(cal["date"]).dropna()).unique().sort_values()
         px = raw.pivot(index="date", columns="code", values="close_adjusted").reindex(dates)
-        tradable = raw.pivot(index="date", columns="code", values="can_trade").reindex(dates).fillna(False).astype(bool)
+        tradable = raw.pivot(index="date", columns="code", values="can_trade").reindex(dates).eq(True)
         features = pd.DataFrame()
         if (root / "stock_features.csv").exists():
             features = pd.read_csv(root / "stock_features.csv", dtype={"code": str})
@@ -69,4 +69,28 @@ class Dataset:
             macro["value"] = pd.to_numeric(macro["value"], errors="coerce")
         meta_path = root / "strategy_data_manifest.json"
         meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {"source": "quant-data-kit", "directory": str(root.resolve())}
+        # 源日历可能覆盖全年，已保存的研究数据却只到上一次请求的末日。
+        coverage_ends = [meta["end"]] if meta.get("end") else []
+        if "coverage_end" in cal:
+            end = date_series(cal["coverage_end"]).max()
+            if pd.notna(end):
+                coverage_ends.append(str(end.date()))
+        if "next_trade_date" in cal and len(dates):
+            next_dates = date_series(cal["next_trade_date"])
+            omitted_sessions = next_dates[next_dates.gt(dates[-1])]
+            if not omitted_sessions.empty:
+                coverage_ends.append(str((omitted_sessions.min() - pd.Timedelta(days=1)).date()))
+        quality_path = root / "quality.json"
+        if quality_path.exists():
+            quality = json.loads(quality_path.read_text(encoding="utf-8"))
+            if quality.get("effective_end"):
+                coverage_ends.append(quality["effective_end"])
+            meta["domestic_quality"] = {
+                "status": quality.get("status"),
+                "price_research_ready": quality.get("price_research_ready"),
+                "market": quality.get("market", []),
+                "path": str(quality_path.resolve()),
+            }
+        if coverage_ends:
+            meta["calendar_coverage_end"] = str(min(pd.Timestamp(end) for end in coverage_ends).date())
         return cls(px, tradable, dates, features, macro, meta)
