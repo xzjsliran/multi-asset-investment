@@ -41,10 +41,12 @@ Windows 使用 `py -3.11 -m venv .venv` 和 `.venv\Scripts\Activate.ps1`。直�
 
 0.7 按回测证据提出一至两项[结果复查](quant-report-kit/references/接口与计算口径.md#结果复查)。优先处理回退和未成交，再看仓位差异及回撤区间的资产贡献。需要继续检验时可在同一目录另存结果。
 
+0.8 的[默认跨境与 QDII 权益预设](quant-strategy-kit/references/跨境资产配置说明.md)采用 50% 美国短期国债、10% 黄金和 40% 股票。A 股宽基、主动 A 股、标普 500、纳斯达克 100 成长各占 10%。
+
 ## 开发、适配与发布
 
 四个 kit 和统一入口各保留一份源码；平台差异放在 `adapters/`，安装包分别由 `scripts/build_codex_release.py`、`scripts/build_claude_code_release.py`、`scripts/build_workbuddy_release.py` 和 `scripts/build_dsh_release.py` 生成。当前提供 Codex、Claude Code、WorkBuddy 和 DeepSeek Harness（DSH）适配。
 
-版本号在 `VERSION`。源码、适配说明和构建脚本进入 Git。生成目录与 ZIP 放在本地 `output/`，上传至对应版本的 GitHub Release。维护步骤见[项目维护与发布](docs/项目维护与发布.md)，平台安装方法见上表。`0.7.0` 面向 Codex、WorkBuddy 和 DeepSeek Harness，三份安装包来自同一核心源码。Claude Code 安装包见 `0.3.0` Release。
+版本号在 `VERSION`。源码、适配说明和构建脚本进入 Git。生成目录与 ZIP 放在本地 `output/`，上传至对应版本的 GitHub Release。维护步骤见[项目维护与发布](docs/项目维护与发布.md)，平台安装方法见上表。`0.8.0` 面向 Codex、WorkBuddy 和 DeepSeek Harness，三份安装包来自同一核心源码。Claude Code 安装包见 `0.3.0` Release。
 
 报告使用[投资回测报告规范](quant-report-kit/references/投资回测报告规范.md)；跨模块要求见[AGENTS.md](AGENTS.md)。各模块 references 仅包含投资研究所需说明，客户报告和产品界面采用投资研究表达。

@@ -120,15 +120,35 @@ class StrategyRules(unittest.TestCase):
                 self.assertEqual(pd.read_csv(out / (key+'.csv')).columns.tolist(), TABLE_COLUMNS[key])
             self.assertEqual(json.loads((out / 'unfilled_at_end.json').read_text()), [])
 
-    def test_qdii_variant_changes_equity_instruments_preserves_bond_and_rules(self):
-        base, qdii = preset('cross-border-allocation'), validate(preset('qdii-equity-allocation'))
-        for original, changed in zip(base['sleeves'], qdii['sleeves']):
-            if original['id'] in {'overseas_growth', 'overseas_broad'}:
-                self.assertEqual(changed['assets'][0]['kind'], 'etf')
-                self.assertEqual(changed['assets'][0]['currency'], 'CNY')
-                self.assertEqual(changed['weight'], original['weight'])
-            else:
-                self.assertEqual(original, changed)
+    def test_cross_border_preset_budgets_and_qdii_substitutions(self):
+        base_name, qdii_name = "cross-border-allocation", "qdii-equity-allocation"
+        configs = {}
+        for name in (base_name, qdii_name):
+            config = preset(name)
+            with (ROOT / "assets" / f"{name}.json").open(encoding="utf-8") as file:
+                self.assertEqual(json.load(file), config)
+            configs[name] = {s["id"]: s for s in validate(config)["sleeves"]}
+
+        base, qdii = configs[base_name], configs[qdii_name]
+        self.assertEqual({sid: s["weight"] for sid, s in base.items()}, {
+            "bond": .50, "gold": .10, "equity": .10, "stocks": .10,
+            "overseas_broad": .10, "overseas_growth": .10,
+        })
+        self.assertEqual(set(qdii), set(base))
+        self.assertIn("成长", base["overseas_growth"]["name"])
+        self.assertEqual(base["equity"]["assets"][0]["code"], "510300.SH")
+        self.assertNotIn("601899.SH", base["stocks"]["selection"].get("exclude", []))
+        for sid in ("bond", "gold", "equity", "stocks"):
+            self.assertEqual(qdii[sid], base[sid])
+        for sid, (direct, mainland) in {
+            "overseas_broad": ("SPY", "513500.SH"),
+            "overseas_growth": ("QQQ", "513100.SH"),
+        }.items():
+            self.assertEqual(base[sid]["assets"][0]["code"], direct)
+            self.assertEqual(qdii[sid]["assets"][0]["code"], mainland)
+            self.assertEqual(qdii[sid]["assets"][0]["kind"], "etf")
+            self.assertEqual(qdii[sid]["assets"][0]["currency"], "CNY")
+            self.assertEqual(qdii[sid]["weight"], base[sid]["weight"])
 
     def test_first_signal_is_previous_day(self):
         c, d = fixture()

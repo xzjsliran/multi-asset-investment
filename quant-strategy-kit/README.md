@@ -16,8 +16,8 @@
 
 | 配置 | 预设标识与文件 | 配置范围 |
 |---|---|---|
-| 跨境多资产配置 | [`cross-border-allocation`](assets/cross-border-allocation.json) | 美元短债、红利、黄金、境内外权益与精选股票 |
-| QDII权益配置 | [`qdii-equity-allocation`](assets/qdii-equity-allocation.json) | 海外权益改用境内QDII，美元短债仍使用SHY |
+| 跨境多资产配置 | [`cross-border-allocation`](assets/cross-border-allocation.json) | 美国短期国债 50%、黄金 10%、A 股宽基 10%、主动 A 股 10%、标普 500 与纳斯达克 100 各 10% |
+| QDII 权益配置 | [`qdii-equity-allocation`](assets/qdii-equity-allocation.json) | 同权重，标普 500 与纳斯达克 100 使用境内 QDII ETF |
 | 境内多资产配置 | [`domestic-allocation`](assets/domestic-allocation.json) | 境内股票、国债、黄金与商品 |
 | VIX动态配置 | [`vix-dynamic-allocation`](assets/vix-dynamic-allocation.json) | 按VIX阈值调整大类比例 |
 | 风险平价配置 | [`risk-parity-allocation`](assets/risk-parity-allocation.json) | 按股票、债券、黄金与商品的估计风险贡献配权 |

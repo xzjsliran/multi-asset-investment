@@ -30,14 +30,13 @@ def preset(name):
         c["long_gap_policy"] = "carry_and_flag"
         c["sleeves"] = [
             fixed("bond", "美元短债", .50, [asset("SHY", "1—3年美国国债ETF", "us_etf")]),
-            fixed("dividend", "红利低波", .10, [asset("510880.SH", "上证红利ETF", until="2019-04-01"), asset("512890.SH", "红利低波ETF", **{"from": "2019-04-01"})]),
-            fixed("gold", "黄金", .07, [asset("518880.SH", "黄金ETF")]),
-            fixed("mining", "紫金矿业", .03, [asset("601899.SH", "紫金矿业", "stock")]),
-            fixed("china_growth", "国内成长", .05, [asset("159915.SZ", "创业板ETF", until="2021-01-01"), asset("588000.SH", "科创50ETF", **{"from": "2021-01-01"})]),
-            fixed("overseas_growth", "海外成长", .05, [asset("QQQ", "纳斯达克100ETF", "us_etf")]),
-            fixed("overseas_broad", "海外宽基", .08, [asset("SPY", "标普500ETF", "us_etf")]),
-            {"id": "stocks", "name": "A股精选", "weight": .12, "rebalance": "quarterly", "assets": [],
-             "selection": {"method": "quality_value", "universe": "all_a", "top_n": 5, "exclude": ["601899.SH"],
+            fixed("gold", "黄金", .10, [asset("518880.SH", "黄金ETF")]),
+            fixed("equity", "A股宽基", .10, [asset("510300.SH", "沪深300ETF")]),
+            # 海外20%平均分给标普500宽基和纳斯达克100成长仓位。
+            fixed("overseas_broad", "海外股票宽基（标普500）", .10, [asset("SPY", "标普500ETF", "us_etf")]),
+            fixed("overseas_growth", "海外股票成长（纳斯达克100）", .10, [asset("QQQ", "纳斯达克100ETF", "us_etf")]),
+            {"id": "stocks", "name": "主动A股", "weight": .10, "rebalance": "quarterly", "assets": [],
+             "selection": {"method": "quality_value", "universe": "all_a", "top_n": 5,
                            "leaders_per_industry": 5, "max_per_industry": 1, "min_roe": 8, "max_pe_ttm": 60, "max_pe": 80,
                            "max_debt": 80, "positive_two_years": True, "min_listing_days": 365, "snapshot_max_age_days": 7,
                            "score_weights": {"quality": .5, "value": .35, "size": .15}, "fill_shortfall": "cash"},
@@ -45,6 +44,7 @@ def preset(name):
         ]
         if name == "qdii-equity-allocation":
             c["name"] = "多资产配置策略（QDII权益）"
+            # 只改变美股指数的持有工具，方便对照同一配置的两种实现。
             replacements = {
                 "overseas_growth": asset("513100.SH", "国泰纳斯达克100ETF", exposure_market="US", listing_market="CN", currency="CNY"),
                 "overseas_broad": asset("513500.SH", "博时标普500ETF", exposure_market="US", listing_market="CN", currency="CNY"),
