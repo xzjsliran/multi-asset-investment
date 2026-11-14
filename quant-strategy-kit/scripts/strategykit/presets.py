@@ -23,7 +23,7 @@ def preset(name):
                            "proxies":{s["id"]:copy.deepcopy(s["assets"]) for s in c["sleeves"]}}
         return c
     c = {"schema_version": 1, "name": "多资产配置策略（海外ETF权益）", "start": "2025-01-01", "end": "2025-12-31",
-         "base_currency": "CNY", "initial_capital": 1_000_000, "cost_rate": 0, "position_policy": "long_only",
+         "base_currency": "CNY", "initial_capital": 1_000_000, "position_policy": "long_only",
          "allocation_rebalance": "quarterly", "max_valuation_gap": 10,
          "benchmark": asset("510300.SH", "沪深300ETF"), "macro": {"enabled": False}}
     if name in {"cross-border-allocation", "qdii-equity-allocation"}:

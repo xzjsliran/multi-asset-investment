@@ -30,6 +30,8 @@ def add_value(data, key, metric, value, unit, strategies, subject, fact_id):
     elif unit == "percentage_point":
         scaled = value * 100
         displayed = "不足0.01个百分点" if 0 < abs(scaled) < .005 else f"{scaled:+.2f}个百分点"
+    elif unit == data["period"].get("currency"):
+        displayed = f"{value:,.2f} {unit}"
     else:
         displayed = f"{value:.2f}"
     data["evidence_values"][key] = {

@@ -11,6 +11,7 @@ KIT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(KIT.parent/"quant-strategy-kit/scripts"))
 
 from strategykit.config import read_config
+from strategykit.costs import cost_confirmation_needed, cost_question
 from strategykit.data import Dataset
 from rebalancekit.inputs import read_json, write_json, review
 from rebalancekit.exports import export_plan, new_output, work_path
@@ -40,6 +41,11 @@ def main():
     q.add_argument("--source", choices=["actual", "simulation"], default="actual")
     args = p.parse_args()
     try:
+        config = read_config(args.config) if hasattr(args, "config") else None
+        if config is not None and cost_confirmation_needed(config):
+            mode = "simulation" if args.command == "simulation" else read_json(args.request).get("mode")
+            print(json.dumps(cost_question(mode), ensure_ascii=False, indent=2))
+            return 0
         if args.command == "import-account":
             import pandas as pd
             from rebalancekit.inputs import timestamp
@@ -58,7 +64,7 @@ def main():
             write_json(target, account)
             result = {"account": str(target.resolve()), "status": "awaiting_user_confirmation"}
         elif args.command == "review":
-            result = review(read_config(args.config), read_json(args.account), read_json(args.request))
+            result = review(config, read_json(args.account), read_json(args.request))
             out = new_output(args.out); out.mkdir(parents=True, exist_ok=True)
             write_json(out/"review.json", result)
             write_json(out/"confirmation.json", result["confirmation_template"])
@@ -74,12 +80,11 @@ def main():
             result = {"quotes": str(target.resolve()), "count": len(result["quotes"])}
         elif args.command == "simulation":
             from rebalancekit.simulation import historical_simulation
-            result = historical_simulation(read_config(args.config), Dataset.load(args.data), args.data, args.signal_date, args.out)
+            result = historical_simulation(config, Dataset.load(args.data), args.data, args.signal_date, args.out)
         else:
-            c = read_config(args.config)
-            plan = make_plan(c, Dataset.load(args.data), read_json(args.account), read_json(args.request), read_json(args.quotes),
+            plan = make_plan(config, Dataset.load(args.data), read_json(args.account), read_json(args.request), read_json(args.quotes),
                              read_json(args.confirmation) if args.confirmation else None)
-            result = export_plan(plan, c, args.out)
+            result = export_plan(plan, config, args.out)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, KeyError, OSError, TypeError) as exc:

@@ -62,10 +62,10 @@ def make_snapshot(data):
             "metricDefinitions": [{"label": qid, "definition": definition}]}}
 
     query("metrics", [{"strategy": s["label"], **s["metrics"]} for s in data["strategies"]],
-          "累计收益=末日净值/首日净值-1；年化收益按日历天数折算；年化波动=日收益样本标准差×√252；最大回撤=min(净值/此前峰值-1)；Sharpe以零无风险利率计算。首日收益记0。")
+          data["period"]["anchor"] + "。累计收益为末日净值与起算基值之比减1。年化收益按日历天数折算，波动率按252日折算。")
     query("original_metrics", [{"strategy": s["label"], **s["original_metrics"]} for s in data["strategies"]], "按各自完整区间重新汇总；不参与共同区间排名。")
     queries["original_metrics"]["source"]["filters"] = ["各策略各自完整回测区间，日期在表格中逐项列出"]
-    query("curves", data["curves"], "共同起点净值归一为1；保留实际历史持仓路径。回撤相对共同区间内此前最高净值。")
+    query("curves", data["curves"], data["period"]["anchor"] + "。回撤相对于此前峰值，含起算基值。")
     query("monthly", data["monthly"], "所选区间内日收益按月复利；首末月可能不完整。")
     query("annual", data["annual"], "所选区间内日收益按年复利；首末年可能不完整。")
     query("facts", data["facts"], "事实编号对应report_data.json中的计算结果和决策记录。")
@@ -89,7 +89,7 @@ def make_snapshot(data):
         query(f"{s['id']}_risk_correlations", risk["correlations"], risk.get("correlation_definition", "未提供"), [f"{source}/{s['source']['daily_file']}"])
         for key, definition, filename in [
             ("rules", "实际运行配置；内置对照显示其实际配权/静态规则。", "strategy.json"),
-            ("contributions", "区间内各部分货币盈亏之和/共同首日权益；剔除首日以前至首日的盈亏，贡献相加等于区间收益。", s["source"]["daily_file"]),
+            ("contributions", "区间内各部分计入费用的货币盈亏之和除以起算权益，贡献相加等于区间收益。", s["source"]["daily_file"]),
             ("holdings", "共同末日收盘调仓后的持仓权重。", "weights.csv"),
             ("weight_history", "各部分每日收盘调仓后的持仓权重。", "weights.csv"),
             ("trades", "所选区间内执行的成交；正金额买入，负金额卖出。", "trades.csv"),
@@ -209,7 +209,7 @@ def markdown_report(data):
     out += [n+"\n" for n in data["scope_notes"]]
     heading("appendix")
     table([{"strategy":s["label"],**s["original_metrics"]} for s in data["strategies"]], [("strategy","策略",None),("start","起始日",None),("end","结束日",None),*cols[1:]])
-    out += ["累计收益为期末与期初净值之比减1。年化收益按实际日历天数折算；年化波动率采用日收益样本标准差乘以√252。夏普比率采用零无风险利率，以日收益均值×252除以年化波动率。首日收益记0。", "",
+    out += [data["period"]["anchor"] + "。累计收益为期末与期初净值之比减1。年化收益按实际日历天数折算，年化波动率采用日收益样本标准差乘以√252。夏普比率采用零无风险利率。", "",
         "回撤相对于所选区间内此前最高净值计算。月度及年度收益为当期日收益的复合收益。资产组合收益贡献按区间货币盈亏除以期初权益计算，合计等于累计收益；该指标不构成经济因果归因。", "",
         "资料来源：所列策略的日度净值、配置参数及已提供的持仓和决策记录。各图表及数据表附来源标识；完整输入指纹保存在随附复核资料中。", ""]
     return "\n".join(out)

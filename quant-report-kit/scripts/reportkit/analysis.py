@@ -7,7 +7,7 @@ import pandas as pd
 
 from .inputs import records
 from .evidence import METRICS, add_value
-from .reporting import public_runs, decorate
+from .reporting import cost_text, public_runs, decorate
 from .long_only import check_long_only
 
 
@@ -58,19 +58,20 @@ def macro_text(c, names):
     return "；".join(parts)
 
 
-def performance(daily):
+def performance(daily, opening_equity=False):
     d = daily[["date", "nav"]].copy().reset_index(drop=True)
-    d["nav"] = d["nav"] / d["nav"].iloc[0]
-    d["return"] = d["nav"].pct_change(fill_method=None).fillna(0)
-    d["drawdown"] = d["nav"] / d["nav"].cummax() - 1
+    if not opening_equity:
+        d["nav"] = d["nav"] / d["nav"].iloc[0]
+    d["return"] = d["nav"].pct_change(fill_method=None).fillna(d["nav"].iloc[0] - 1)
+    d["drawdown"] = d["nav"] / d["nav"].cummax().clip(lower=1.) - 1
     r = d["return"]
     years = (d["date"].iloc[-1] - d["date"].iloc[0]).days / 365.25
     vol = float(r.std(ddof=1) * np.sqrt(252))
     trough = int(d["drawdown"].idxmin())
     peak = int(d.loc[:trough, "nav"].idxmax())
-    recovered = d.loc[trough:].loc[d["nav"] >= d.loc[peak, "nav"]]
+    recovered = d.loc[trough:].loc[d["nav"] >= max(1., d.loc[peak, "nav"])]
     info = {"start": d["date"].iloc[0].strftime("%Y-%m-%d"), "end": d["date"].iloc[-1].strftime("%Y-%m-%d"),
-            "observations": len(d), "return_intervals": len(d)-1, "total_return": float(d["nav"].iloc[-1]-1),
+            "observations": len(d), "return_intervals": len(d) - (not opening_equity), "total_return": float(d["nav"].iloc[-1]-1),
             "annual_return": float(d["nav"].iloc[-1] ** (1 / years) - 1), "annual_volatility": vol,
             "max_drawdown": float(d["drawdown"].min()),
             "sharpe_zero_rf": float(r.mean()*252/vol) if vol > 1e-12 else None,
@@ -84,7 +85,7 @@ def rule_rows(run):
     c = run.config
     freq = {"weekly": "每周", "monthly": "每月", "quarterly": "每季度"}
     rows = [{"parameter": "大类调仓", "value": freq.get(c.get("allocation_rebalance"), "买入持有/未提供")},
-            {"parameter": "交易成本率", "value": str(c.get("cost_rate", "未提供"))},
+            {"parameter": "交易成本率", "value": cost_text(c)},
             {"parameter": "基础币种", "value": run.currency}]
     allocation = c.get("allocation", {})
     if allocation.get("method") == "risk_parity":
@@ -135,22 +136,25 @@ def bounded(frame, start, end, date_col="date"):
     return d.loc[dates.between(start, end)].copy()
 
 
-def detail(run, selected, metrics, start, end):
+def detail(run, selected, metrics, start, end, opening_capital):
     from .risk import analyse_risk
     names = {s["id"]: s.get("name", s["id"]) for s in run.config.get("sleeves", [])}
     names["cash"] = "未分配现金"
     out = {"rules": rule_rows(run), "contributions": [], "holdings": [], "weight_history": [],
            "trades": [], "selections": [], "regimes": [], "optimization": [], "diagnostics": [],
            "source_notes": run.documents.get("manifest", {}).get("notes", []), "notices": list(run.notices)}
-    out["risk"] = analyse_risk(selected, names)
+    out["risk"] = analyse_risk(selected, names, opening_capital)
+    included = selected if opening_capital is not None else selected.iloc[1:]
+    if "transaction_cost" in selected:
+        out["transaction_cost"] = float(included["transaction_cost"].sum())
     # 从每日分部分盈亏截取共同区间；不能把完整历史贡献混入短期比较。
     pnl_cols = [c for c in selected if c.startswith("pnl_")]
     if pnl_cols and "equity" in selected:
         if not np.isfinite(selected[pnl_cols].to_numpy(dtype=float)).all():
             raise ValueError(f"{run.label}的分部分盈亏包含空值或无效数值。")
-        denom = float(selected["equity"].iloc[0])
+        denom = opening_capital if opening_capital is not None else float(selected["equity"].iloc[0])
         for col in pnl_cols:
-            amount = float(selected[col].iloc[1:].sum())
+            amount = float(included[col].sum())
             sid = col[4:]
             out["contributions"].append({"sleeve": sid, "name": names.get(sid, sid), "pnl": amount, "contribution": amount/denom})
         error = sum(x["contribution"] for x in out["contributions"]) - metrics["total_return"]
@@ -260,9 +264,13 @@ def analyse(config, runs):
     if len(dates) < 2 or any(not x["date"].equals(dates) for x in selections[1:]):
         raise ValueError("共同区间的交易日期不一致，请先统一日历或补齐缺失；报告不会插值补净值。")
     start, end = dates.iloc[0], dates.iloc[-1]
+    # 只有所有方案共同从建仓日开始，主比较才计入首日。子区间取共同首日收盘。
+    opening = all(run.daily["date"].iloc[0] == start and run.uses_opening_capital for run in runs)
+    anchor = ("共同建仓前本金归一为1，首日计入实际建仓费用" if opening
+              else "共同起始日收盘净值归一为1；起始日之前及当日已发生的收益不计入比较")
     data = {"schema_version": 1, "title": config.get("title", "资产配置策略研究报告"),
             "period": {"start": str(start.date()), "end": str(end.date()), "observations": len(dates),
-                       "currency": runs[0].currency, "anchor": "共同起始日收盘净值归一为1；起始日之前及当日已发生的收益不计入比较"},
+                       "currency": runs[0].currency, "anchor": anchor},
             "strategies": [], "curves": [], "monthly": [], "annual": [], "pairs": [], "facts": [],
             "evidence_values": {}, "execution_findings": [],
             "methods": {"annualization_days": 252, "cagr": "按首末日期之间天数/365.25折算", "risk_free_rate": 0,
@@ -278,9 +286,10 @@ def analyse(config, runs):
         return fact_id
 
     for run, selected in zip(runs, selections):
-        d, m = performance(selected)
-        _, original = performance(run.daily)
-        details = detail(run, selected, m, start, end)
+        d, m = performance(selected, opening)
+        _, original = performance(run.daily, run.uses_opening_capital)
+        opening_capital = run.initial_capital if opening else None
+        details = detail(run, selected, m, start, end, opening_capital)
         review = execution_review(run, details["regimes"], start)
         label = run.label
         if review and review["status"] == "method_not_evaluated":
@@ -304,6 +313,11 @@ def analyse(config, runs):
         for key, metric in METRICS.items():
             unit = "ratio" if key == "sharpe_zero_rf" else "percent"
             add_value(data, f"metric.{run.id}.{key}", metric, m[key], unit, [run.id], label, metric_fact)
+        if "transaction_cost" in details:
+            amount = details["transaction_cost"]
+            fee_fact = fact(f"{label}在比较区间计入交易费用{amount:,.2f} {run.currency}。", [run.id],
+                            [SCENARIO_FILE(run) + "#transaction_cost"])
+            add_value(data, f"metric.{run.id}.transaction_cost", "交易费用", amount, run.currency, [run.id], label, fee_fact)
         if review and review["status"] != "ready":
             text = review["text"]
             fact_id = fact(text, [run.id], ["detail.regimes", "execution_review"])
@@ -369,7 +383,7 @@ def analyse(config, runs):
     data["scope_notes"] = []
     if any(r.daily["date"].iloc[0]!=start or r.daily["date"].iloc[-1]!=end for r in runs):
         data["scope_notes"].append("各策略原始日期范围不同或本次指定了子区间；主图和指标统一按共同区间重算，各自全区间结果另列。")
-    if len({str(r.config.get("cost_rate", "unknown")) for r in runs}) > 1:
+    if len({cost_text(r.config) for r in runs}) > 1:
         data["scope_notes"].append("这些策略采用不同或未注明的交易成本设置，差异已保留在规则表中。")
     data["scope_notes"].append("收益最高、回撤最浅分别描述本次历史结果；策略设置不同的比较同时包含资产、比例和规则变化。")
     return decorate(data, config)

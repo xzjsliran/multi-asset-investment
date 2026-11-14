@@ -5,7 +5,6 @@
   "end": "2025-12-31",
   "base_currency": "CNY",
   "initial_capital": 1000000,
-  "cost_rate": 0,
   "position_policy": "long_only",
   "allocation_rebalance": "quarterly",
   "max_valuation_gap": 10,

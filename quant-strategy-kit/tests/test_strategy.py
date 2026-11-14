@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT.parent / "quant-data-kit/scripts"))
 
 from strategykit.config import validate, schedule
+from strategykit.costs import normalize_costs, trade_cost
 from strategykit.data import Dataset
 from strategykit.engine import backtest
 from strategykit.selection import minimum_variance, select_and_weight, quality_value
@@ -39,6 +40,65 @@ def fixture():
 
 
 class StrategyRules(unittest.TestCase):
+    def test_stamp_schedule_changes_on_execution_date_and_only_for_stocks(self):
+        costs = normalize_costs({"stamp_duty_rate": .001, "stamp_duty_schedule": [
+            {"from": "2023-08-28", "rate": .0005},
+        ]})
+        self.assertEqual(trade_cost(costs, -10000, "stock", "2023-08-25")["stamp_duty"], 10.)
+        self.assertEqual(trade_cost(costs, -10000, "stock", "2023-08-28")["stamp_duty"], 5.)
+        self.assertEqual(trade_cost(costs, 10000, "stock", "2023-08-28")["stamp_duty"], 0.)
+        self.assertEqual(trade_cost(costs, -10000, "etf", "2023-08-28")["stamp_duty"], 0.)
+        with self.assertRaises(ValueError):
+            normalize_costs({"commission_rate": -.001})
+        with self.assertRaises(ValueError):
+            normalize_costs({"commission_rate": True})
+        with self.assertRaises(ValueError):
+            normalize_costs({"commission_rate": .6, "slippage_rate": .4})
+
+    def test_costs_on_actual_fills_keep_initial_cash_and_reconcile_daily_profit(self):
+        c, d = fixture()
+        c["sleeves"][0]["weight"] = .4
+        c["sleeves"][1]["weight"] = .4
+        c["sleeves"][1]["assets"][0]["kind"] = "etf"
+        c["transaction_costs"] = {"commission_rate": .001, "slippage_rate": .002, "stamp_duty_rate": .005}
+        d.prices.loc[:, ["A", "B"]] = 100.
+        d.prices.loc[d.prices.index >= "2025-02-01", "A"] = 130.
+        d.prices.loc[d.prices.index >= "2025-02-01", "B"] = 140.
+        result = backtest(c, d)
+        daily, trades = result["daily"], result["trades"]
+        start = daily.iloc[0]
+        self.assertAlmostEqual(start.transaction_cost, 800 / 1.003 * .003)
+        self.assertAlmostEqual(start["return"], -start.transaction_cost / 1000.)
+        self.assertAlmostEqual(start.cash_weight * start.equity, 200.)
+        self.assertEqual(trades.loc[trades.side.eq("buy"), "stamp_duty"].sum(), 0.)
+        sells = trades.loc[trades.side.eq("sell")]
+        self.assertEqual(set(sells.code), {"A", "B"})
+        self.assertAlmostEqual(sells.loc[sells.code.eq("A"), "stamp_duty"].sum(),
+                               sells.loc[sells.code.eq("A"), "amount"].abs().sum() * .005)
+        self.assertEqual(sells.loc[sells.code.eq("B"), "stamp_duty"].sum(), 0.)
+        self.assertTrue(trades["cost"].ge(0).all())
+        self.assertAlmostEqual(trades.cost.sum(), daily.transaction_cost.sum())
+        np.testing.assert_allclose(daily.filter(like="pnl_").sum(axis=1),
+                                   daily.equity.diff().fillna(start.equity - 1000.), atol=1e-9)
+        self.assertFalse(result["final_state"]["pending"])
+
+    def test_internal_transfer_in_shared_account_has_no_market_fee(self):
+        c, d = fixture()
+        c["sleeves"][1]["assets"][0]["code"] = "A"
+        c["macro"] = {"enabled": True, "rebalance": "quarterly", "rules": [
+            {"name": "高波动", "all": [{"series": "vix", "op": ">", "threshold": 20}],
+             "weights": {"one": .2, "two": .8}},
+        ]}
+        c["transaction_costs"] = {"commission_rate": .001, "stamp_duty_rate": .005}
+        d.prices.loc[:, "A"] = 100.
+        d.macro = pd.DataFrame([{"series": "vix", "period": "2025-03-31", "value": 30.,
+                                 "available_at": pd.Timestamp("2025-03-31T01:00:00Z"), "signal_eligible": True, "source": "synthetic"}])
+        result = backtest(c, d)
+        transfers = result["trades"].loc[result["trades"].internal_transfer]
+        self.assertFalse(transfers.empty)
+        self.assertAlmostEqual(transfers["amount"].sum(), 0.)
+        self.assertEqual(transfers["cost"].sum(), 0.)
+
     def test_result_handoff_can_be_read_without_renderer_or_engine(self):
         c, d = fixture()
         # 独立消费CSV/JSON，重新复算资金与年度收益；结果目录不应生成展示文件。

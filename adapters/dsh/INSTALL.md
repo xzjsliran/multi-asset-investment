@@ -1,10 +1,10 @@
 # DeepSeek Harness 安装与首次使用
 
-此包将 `v0.5.0` 的多资产投资研究核心接入 DeepSeek Harness（DSH），包含统一 Skill、数据、策略、报告及调仓四个模块。
+此包将 `v0.6.0` 的多资产投资研究核心接入 DeepSeek Harness（DSH），包含统一 Skill、数据、策略、报告及调仓四个模块。
 
 ## 下载与解压
 
-从本地交付目录或 GitHub Release 获取 `multi-asset-investment-dsh-v0.5.0.zip`，完整解压得到 `multi-asset-investment-dsh` 文件夹，放在后续可以持续访问的位置。包内是一个 DSH 组合包。`package.json` 声明组合入口，`cordis.patch.yml` 登记插件，`index.js` 注册 `skills/multi-asset-investment/` 内的统一 Skill、四个模块、报告模板和示例。
+从本地交付目录或 GitHub Release 获取 `multi-asset-investment-dsh-v0.6.0.zip`，完整解压得到 `multi-asset-investment-dsh` 文件夹，放在后续可以持续访问的位置。包内是一个 DSH 组合包。`package.json` 声明组合入口，`cordis.patch.yml` 登记插件，`index.js` 注册 `skills/multi-asset-investment/` 内的统一 Skill、四个模块、报告模板和示例。
 
 ## 安装到 DSH
 

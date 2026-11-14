@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from .costs import normalize_costs, rate
+
 ROOT = Path(__file__).resolve().parents[2]
 FREQUENCIES = {"weekly": "W-FRI", "monthly": "M", "quarterly": "Q-DEC"}
 
@@ -40,8 +42,11 @@ def validate(config):
     c.setdefault("initial_capital", 1_000_000.)
     if not math.isfinite(float(c["initial_capital"])) or c["initial_capital"] <= 0:
         raise ValueError("初始资金应为正数。")
-    if c.get("cost_rate", 0) != 0:
-        raise ValueError("当前回测忽略交易成本，cost_rate 应为 0。")
+    legacy_rate = rate(c.get("cost_rate", 0), "cost_rate")
+    if "transaction_costs" in c:
+        if legacy_rate:
+            raise ValueError("请使用 transaction_costs 或旧字段 cost_rate 之一。")
+        c["transaction_costs"] = normalize_costs(c["transaction_costs"])
     if c.get("long_gap_policy", "error") not in {"error", "carry_and_flag"}:
         raise ValueError("长期估值缺口处理为 error 或 carry_and_flag。")
     if c.get("allocation_rebalance") not in FREQUENCIES:

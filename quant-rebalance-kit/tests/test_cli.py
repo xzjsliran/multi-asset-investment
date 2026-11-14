@@ -26,6 +26,11 @@ class CommandWorkflow(unittest.TestCase):
             imported=run(['import-account','--positions-csv',str(p/'positions.csv'),'--cash-csv',str(p/'cash.csv'),'--as-of',a['as_of'],'--out',str(p/'account.json')])
             self.assertEqual(imported.returncode,0,imported.stderr)
             common=['--config',str(p/'strategy.json'),'--account',str(p/'account.json'),'--request',str(p/'request.json')]
+            unresolved=run(['review',*common,'--out',str(p/'review')])
+            self.assertEqual(json.loads(unresolved.stdout)['next_action'],'confirm_transaction_costs')
+            self.assertFalse((p/'review').exists())
+            c['transaction_costs']={'commission_rate':0}
+            (p/'strategy.json').write_text(json.dumps(c))
             reviewed=run(['review',*common,'--out',str(p/'review')])
             self.assertEqual(reviewed.returncode,0,reviewed.stderr)
             cf=p/'review/confirmation.json'

@@ -9,8 +9,9 @@ import math
 
 import pandas as pd
 
+from strategykit.costs import COST_FIELDS, asset_kinds, charges_fees, costs_for, trade_cost
 from strategykit.decision import decide, event_on
-from .inputs import digest, require_confirmation, timestamp, validate_inputs
+from .inputs import decision_digest, digest, require_confirmation, timestamp, validate_inputs
 from .quotes import validate_quotes
 
 
@@ -72,12 +73,28 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
     if not positions and not r["initial_allocation"]:
         raise ValueError("空仓首次配置请在确认请求中设置initial_allocation=true。")
     event = choose_event(c, a, r, data.calendar)
+    costs, kinds = costs_for(c), asset_kinds(c, data.features)
+    fee_enabled = charges_fees(costs)
+    execution_date = str(event["execution_date"].date())
     labels = {asset["code"]: asset.get("name", asset["code"]) for s in c["sleeves"] for asset in s.get("assets", [])}
     if not data.features.empty and {"snapshot_date", "code", "historical_name"} <= set(data.features):
         known_names = data.features.loc[data.features["snapshot_date"] <= event["signal_date"]].sort_values("snapshot_date").dropna(subset=["historical_name"])
         labels.update(known_names.drop_duplicates("code", keep="last").set_index("code")["historical_name"].to_dict())
     for code, quote in quotes.items():
         quote["name"] = labels.get(code, quote.get("name", code))
+        if code in kinds and quote.get("kind") not in {None, kinds[code]}:
+            raise ValueError("报价证券类型与策略或财务数据冲突："+code)
+        quote["kind"] = kinds.get(code) or quote.get("kind")
+
+    def fees(code, quantity):
+        quote = quotes[code]
+        try:
+            return trade_cost(costs, quantity * quote["price"], quote["kind"], execution_date)
+        except ValueError as exc:
+            raise ValueError(f"{code}：{exc}") from exc
+
+    def total_fee(code, quantity):
+        return sum(fees(code, quantity).values())
     state = a["strategy_state"]
     inner = copy.deepcopy(state.get("inner_weights", {}))
     for sid in ids[:-1]:
@@ -110,6 +127,7 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
         liquid[bucket(sid, cur)] += value
     projected = copy.deepcopy(positions)
     legs, buy_requests, issues = [], [], []
+    sell_quantities = defaultdict(float)
     for (sid, code), held in positions.items():
         if held["quantity"] > 0 and quotes[code]["age_days"] > r["max_quote_age_days"]:
             issues.append({"sleeve": sid, "code": code, "reason": "持仓估值沿用较旧报价，需更新后复核计划"})
@@ -122,7 +140,10 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
         projected[key]["quantity"] += delta
         if delta < 0:
             projected[key]["available_quantity"] += delta
-        liquid[bucket(sid, q["currency"])] -= delta*q["price"]
+        liquid[bucket(sid, q["currency"])] -= delta * q["price"]
+        if delta < 0:
+            sell_quantities[code] -= delta
+            liquid[bucket(sid, q["currency"])] -= total_fee(code, delta)
         legs.append({"sleeve": sid, "code": code, "signed_quantity": delta,
                      "amount_native": delta*q["price"], "amount_cny": delta*q["price_cny"], "currency": q["currency"]})
     for sid in decision["group"]:
@@ -150,7 +171,21 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
                 buy = floor_lot(change, q["buy_lot"])
                 if (change-buy)*q["price_cny"] > .01:
                     issues.append({"sleeve": sid, "code": code, "reason": "买入按最小交易单位取整，余款保留现金"})
-                buy_requests.append({"sleeve": sid, "code": code, "quantity": buy, "bucket": bucket(sid, q["currency"])})
+                if buy:
+                    buy_requests.append({"sleeve": sid, "code": code, "quantity": buy, "bucket": bucket(sid, q["currency"])})
+    # 组合共享资金时，用已确认可卖的份额完成内部划转，再分配可用于市场买入的现金。
+    unmatched_sells = sell_quantities.copy()
+    buy_quantities = defaultdict(float)
+    if event["is_outer"] and fee_enabled:
+        for row in buy_requests:
+            code = row["code"]
+            quantity = floor_lot(min(row["quantity"], unmatched_sells[code]), quotes[code]["buy_lot"])
+            leg(row["sleeve"], code, quantity)
+            liquid[row["bucket"]] += total_fee(code, -quantity)
+            buy_quantities[code] += quantity
+            row["quantity"] -= quantity
+            unmatched_sells[code] -= quantity
+        buy_requests = [row for row in buy_requests if row["quantity"] > 1e-10]
     # 各资金组按币种保留目标现金，外币不足不借款、不隐含兑换。
     reserve = {}
     active_owners = {"portfolio"} if event["is_outer"] else active
@@ -168,18 +203,42 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
     funding_gaps = []
     for b in sorted({row["bucket"] for row in buy_requests}):
         rows = [row for row in buy_requests if row["bucket"] == b]
-        wanted = sum(row["quantity"]*quotes[row["code"]]["price"] for row in rows)
+        wanted_by_code = defaultdict(float)
+        for row in rows:
+            wanted_by_code[row["code"]] += row["quantity"]
+
+        def buy_cash(code, quantity):
+            # 先匹配已有卖出再计算市场买入。内部转移按原价结算，两边都没有市场费用。
+            matched = min(unmatched_sells[code], quantity)
+            return quantity * quotes[code]["price"] + total_fee(code, quantity - matched) - total_fee(code, -matched)
+
+        wanted = sum(buy_cash(code, quantity) for code, quantity in wanted_by_code.items())
         budget = max(0., liquid[b] - reserve[b])
         if wanted > budget + .01:
             funding_gaps.append({"scope": b[0], "currency": b[1], "required_buy_cash_native": wanted,
                                  "spendable_cash_native": budget, "shortfall_native": wanted-budget})
         ratio = min(1., budget/wanted) if wanted > 0 else 0.
+        if fee_enabled and ratio < 1 and any(unmatched_sells[code] for code in wanted_by_code):
+            low, high = 0., 1.
+            for _ in range(40):
+                middle = (low + high) / 2
+                if sum(buy_cash(code, quantity * middle) for code, quantity in wanted_by_code.items()) <= budget:
+                    low = middle
+                else:
+                    high = middle
+            ratio = low
         for row in rows:
-            q = quotes[row["code"]]
+            code = row["code"]
+            q = quotes[code]
             quantity = floor_lot(row["quantity"]*ratio, q["buy_lot"])
-            leg(row["sleeve"], row["code"], quantity)
+            matched = min(unmatched_sells[code], quantity)
+            cost = total_fee(code, quantity - matched) - total_fee(code, -matched)
+            leg(row["sleeve"], code, quantity)
+            liquid[b] -= cost
+            unmatched_sells[code] -= matched
+            buy_quantities[code] += quantity
             if quantity < row["quantity"]-1e-8:
-                issues.append({"sleeve": row["sleeve"], "code": row["code"], "reason": f"{q['currency']}可用现金或保留现金约束，买入数量缩减"})
+                issues.append({"sleeve": row["sleeve"], "code": row["code"], "reason": f"{q['currency']}买入含费用后受可用现金或保留现金约束，数量缩减"})
     if min(liquid.values(), default=0.) < -1e-7 or any(p["quantity"] < -1e-8 for p in projected.values()):
         raise AssertionError("计划出现负持仓或现金透支。")
     # 大类事件后，将现金按目标归属分配；整手余款归未分配现金。
@@ -200,25 +259,33 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
             post_cash.append({"sleeve": "cash", "currency": cur, "amount": max(0., value-assigned)})
     else:
         post_cash = [{"sleeve": sid, "currency": cur, "amount": max(0., v)} for (sid, cur), v in liquid.items()]
-    net = defaultdict(float)
-    for row in legs:
-        net[row["code"]] += row["signed_quantity"]
     orders = []
-    for code, delta in sorted(net.items()):
+    cost_totals = dict.fromkeys(COST_FIELDS, 0.)
+    for code in sorted(sell_quantities.keys() | buy_quantities.keys()):
+        delta = buy_quantities[code] - sell_quantities[code]
         if abs(delta) <= 1e-9:
             continue
         q = quotes[code]
+        breakdown = fees(code, delta)
+        native_cost = sum(breakdown.values())
+        for field in COST_FIELDS:
+            cost_totals[field] += breakdown[field] * rates[q["currency"]]
         orders.append({"code": code, "name": q.get("name", code), "side": "buy" if delta > 0 else "sell",
                        "quantity": abs(delta), "signed_quantity": delta, "reference_price": q["price"],
                        "price_available_at": q["available_at"], "currency": q["currency"],
                        "amount_native": abs(delta)*q["price"], "amount_cny": abs(delta)*q["price_cny"],
-                       "estimated_cash_change_native": -delta*q["price"], "estimated_cost": 0.})
+                       "estimated_cash_change_native": -delta*q["price"] - native_cost,
+                       "estimated_cost": native_cost, "estimated_cost_native": native_cost,
+                       "estimated_cost_cny": native_cost * rates[q["currency"]],
+                       **{f"{field}_native": breakdown[field] for field in COST_FIELDS}})
     orders.sort(key=lambda x: (x["side"] != "sell", x["code"]))
     cash_after = sum(row["amount"]*rates[row["currency"]] for row in post_cash)
     if cash_after < r["cash_buffer_cny"]-.01:
         issues.append({"sleeve": "cash", "code": "CASH", "reason": "按当前策略目标产生的卖出回款不足以满足额外保留现金要求，需要调整约束或目标配置"})
     stock_after = sum(p["quantity"]*quotes[code]["price_cny"] for (_, code), p in projected.items())
-    error = stock_after+cash_after-equity
+    estimated_equity = stock_after + cash_after
+    total_cost = sum(cost_totals.values())
+    error = estimated_equity + total_cost - equity
     if abs(error) > max(1., equity)*1e-9:
         raise AssertionError("参考价下资金不守恒。")
     target_rows, holding_rows = [], []
@@ -235,7 +302,7 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
                                  "current_available_quantity": positions.get((sid, code), {}).get("available_quantity", 0.),
                                  "current_value_cny": before*px, "projected_value_cny": after*px,
                                  "current_weight": before*px/equity, "target_weight": target[sid].get(code, 0.)/equity,
-                                 "projected_weight": after*px/equity,
+                                 "projected_weight": after*px/estimated_equity,
                                  "deviation_cny": after*px-target[sid].get(code, 0.)})
     next_dates = []
     for day in data.calendar[data.calendar > event["execution_date"]]:
@@ -259,7 +326,10 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
                    "execution_date": str(event["execution_date"].date()), "requested_execution_date": event["requested_execution_date"],
                    "requires_signal_refresh": event["preliminary"]},
         "event": {"is_outer": event["is_outer"], "selection_sleeves": event["new_ids"], "participating_sleeves": decision["group"]},
-        "account": {"equity_cny": equity, "cash_before_cny": sum(current_cash.values()), "cash_after_cny": cash_after},
+        "account": {"equity_cny": equity, "cash_before_cny": sum(current_cash.values()), "cash_after_cny": cash_after,
+                    "projected_equity_cny": estimated_equity},
+        "transaction_costs": {"policy": costs, "estimated_total_cny": total_cost,
+                              **{f"{field}_cny": cost_totals[field] for field in COST_FIELDS}},
         "targets": target_rows, "holdings": holding_rows, "orders": orders, "allocation_legs": legs,
         "cash_before": a["cash"], "cash_after": post_cash, "quotes": list(quotes.values()), "fx": rates, "fx_available_at": fx_times,
         "regime": decision["regime"], "optimization": decision["optimization"],
@@ -267,12 +337,13 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
         "issues": issues, "funding_gaps": funding_gaps, "next_events": next_dates,
         "checks": {"position_policy": "long_only", "negative_positions": 0, "negative_cash": 0,
                    "fund_conservation_error_cny": error, "target_weight_sum": sum(x["target_weight"] for x in target_rows),
-                   "orders_netted_by_security": True, "cost_rate": 0, "raw_prices_for_quantities": True},
-        "state_if_fully_executed": {"status": "projection_not_execution", "strategy_digest": digest(c),
+                   "orders_netted_by_security": True, "transaction_cost_cny": total_cost, "raw_prices_for_quantities": True},
+        "state_if_fully_executed": {"status": "projection_not_execution", "strategy_digest": decision_digest(c),
                     "previous_allocation": decision["allocation"], "inner_weights": decision["inner"]},
         "notes": ["全部资产只做多；持仓、目标权重和现金均不得为负。卖出仅限已有可卖持仓。",
                   "买卖数量按列示原始参考价和交易单位估算；执行前更新报价、现金与可卖数量。",
-                  "交易费用暂按零计算。各币种独立检查资金，外币不足时减少买入并列示缺口，不隐含兑换。",
+                  "预计净回款和买入支出均已计入选定费用。各币种独立检查资金，外币不足时减少买入。",
+                  "比例费用估计未单列最低佣金、独立过户费和换汇费用。",
                   "调仓日历沿用中国交易日决策口径；实际外币证券另核实当地交易日。",
                   "本次生成计划不更新实际持仓。执行后须按真实成交重新核对账户。"]}
     if event["preliminary"]:

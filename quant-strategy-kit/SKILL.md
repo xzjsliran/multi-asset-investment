@@ -22,18 +22,20 @@ description: 为商业客户的资产配置研究把用户的资产范围、选�
 
 先用一小段话复述将执行的规则。需求已明确就继续，规则互相冲突才提问。详细配置见 [配置与计算说明](references/配置与计算说明.md)，运行步骤见[使用指南](references/使用指南.md)。
 
+运行前确认[交易成本](references/交易成本说明.md)。用户未提费用时主动给出参考模拟、较高成本敏感性、零成本对照或实际费率选项，等待确认并填写 `transaction_costs`。已有明确费率可直接沿用。
+
 ## 运行
 
 1. 定位本 Skill 和数据模块。默认两者为同级 `quant-strategy-kit` / `quant-data-kit`；不同目录用 `--data-kit` 指明。读取现有环境，首次按使用指南安装依赖；本模块新增SciPy，数据模块的海外与快照扩展另有依赖。
 2. `scripts/run.py init --preset cross-border-allocation --out <工作目录/strategy.json>`；修改副本。明确使用境内QDII版本时选 `qdii-equity-allocation`；境内多资产配置用 `domestic-allocation`；VIX动态参考用 `vix-dynamic-allocation`；风险平价参考用`risk-parity-allocation`。
 3. `scripts/run.py plan --config <配置> --out <工作目录/data-plan.json>` 查看数据需求。
 4. 已有第一部分结果可直接用于回测。缺数据时：`scripts/run.py prepare --config <配置> --data-kit <数据模块目录> --work <新工作目录>`。已有归档研究数据时可追加 `--research <归档研究目录>` 只读重建历史输入。历史财务选股需要本地Tushare权限；不可悄悄拿今天的财务或当前成分股回填历史。
-5. 通过统一插件执行研究时，先用 `research preview` 核对标准行情、日历和预热样本，再用 `research run`。独立模块仍可调用 `scripts/run.py backtest --config <配置> --data <标准数据目录> --out <新结果目录>@。数据、缓存和结果写入研究工作目录。
+5. 通过统一插件执行研究时，先用 `research preview` 核对标准行情、日历和预热样本，再用 `research run`。独立模块仍可调用 `scripts/run.py backtest --config <配置> --data <标准数据目录> --out <新结果目录>`。数据、缓存和结果写入研究工作目录。
 6. 读取 `handoff.json` 的 `execution_review` 和 `checks.json`，核对 `optimization.json`、`regimes.json` 及缺口。全程回退时按实际路径解释。策略模块输出数据交给报告模块。内置对照与使用条件见回测结果接口。
 
 ## 解释结果时需知道
 
-- 默认配置采用最小方差配权、零成本及中国交易日记账，参数与假设见 [跨境资产配置说明](references/跨境资产配置说明.md)。
+- 跨境预设采用最小方差配权及中国交易日记账，按已确认费率扣除模拟成交费用。参数与假设见[跨境资产配置说明](references/跨境资产配置说明.md)。
 - 协方差只取信号日前的收益，默认126个交易日；共同观测少于60次或求解失败时记录等权回退。目标为不做空、权重和为1；默认单股最多占精选部分40%，可改。
 - 信号日与成交日分开。通常本期末形成信号，下期首个交易日收盘记账；当日收益归原持仓。不同部分独立持有，不做隐含每日再平衡。
 - 宏观使用第一部分 `macro_observations.csv` 中 `signal_eligible=true` 且 `available_at` 不晚于决策时点的记录。美国月度历史快照可用数据模块 `fred-events` 转换；缺指标按配置处理，记录到regimes.json，不能手工把未核验记录改成可用。

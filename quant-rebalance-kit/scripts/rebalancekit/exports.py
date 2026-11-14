@@ -10,7 +10,9 @@ from .inputs import write_json
 COLUMNS = {
     "targets": ["sleeve", "code", "target_value_cny", "target_weight"],
     "holdings": ["sleeve", "code", "current_quantity", "current_available_quantity", "projected_quantity", "current_value_cny", "projected_value_cny", "current_weight", "target_weight", "projected_weight", "deviation_cny"],
-    "orders": ["code", "name", "side", "quantity", "signed_quantity", "reference_price", "price_available_at", "currency", "amount_native", "amount_cny", "estimated_cash_change_native", "estimated_cost"],
+    "orders": ["code", "name", "side", "quantity", "signed_quantity", "reference_price", "price_available_at",
+               "currency", "amount_native", "amount_cny", "estimated_cash_change_native", "estimated_cost",
+               "estimated_cost_native", "estimated_cost_cny", "commission_native", "slippage_native", "stamp_duty_native"],
     "cash_after": ["sleeve", "currency", "amount"],
     "allocation_legs": ["sleeve", "code", "signed_quantity", "amount_native", "amount_cny", "currency"],
 }
@@ -43,6 +45,7 @@ def export_plan(plan, config, output):
     write_json(out/"ai_context.json", {"document_type": "rebalance_plan", "plan_file": "plan.json",
                "strategy_file": "strategy.json", "mode": plan["mode"], "timing": plan["timing"],
                "evidence": {"strategy_targets": "plan.json#/targets", "orders": "plan.json#/orders",
+                            "transaction_costs": "plan.json#/transaction_costs",
                             "constraints": "plan.json#/issues", "macro": "plan.json#/regime", "selection": "plan.json#/selections"},
                "instructions": ["使用计划中已计算的权重、数量及证据，不能自行添加宏观判断或预测。",
                                 "明确计划日期及模拟/实际账户状态；预案需在信号日更新。",
@@ -50,6 +53,7 @@ def export_plan(plan, config, output):
                                 "全部资产只做多；负买卖差额表示减持，不能解释为开空仓。"]})
     write_json(out/"handoff.json", {"schema_version": 1, "producer": "quant-rebalance-kit", "document_type": "rebalance_plan",
                "position_policy": "long_only", "base_currency": "CNY",
-               "units": {"value": "CNY", "order_price": "native_currency", "weight": "decimal", "quantity": "native_security_units"},
+               "units": {"value": "CNY", "order_price": "native_currency", "estimated_cost": "native_currency",
+                         "weight": "decimal", "quantity": "native_security_units"},
                "files": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(out.iterdir()) if p.is_file()}})
     return {"result_dir": str(out), "handoff": str(out/"handoff.json"), "orders": len(plan["orders"]), "status": plan["status"]}

@@ -88,7 +88,7 @@ def effective_config(config, scenario):
     elif scenario == "benchmark":
         c = {"name": c.get("benchmark", {}).get("code", "基准") + "买入持有",
              "base_currency": c.get("base_currency", "CNY"), "initial_capital": c.get("initial_capital"),
-             "cost_rate": c.get("cost_rate", 0), "sleeves": [], "benchmark_only": c.get("benchmark", {})}
+             "cost_rate": 0, "sleeves": [], "benchmark_only": c.get("benchmark", {})}
     return c
 
 
@@ -109,6 +109,18 @@ class Run:
     @property
     def currency(self):
         return self.handoff.get("base_currency", self.config.get("base_currency", "CNY"))
+
+    @property
+    def initial_capital(self):
+        return self.handoff.get("initial_capital", self.config.get("initial_capital"))
+
+    @property
+    def uses_opening_capital(self):
+        if self.handoff.get("conventions", {}).get("opening_return") == "from_initial_capital":
+            return True
+        # 旧版策略引擎零成本建仓，首日净值已等于初始本金。
+        return (self.handoff.get("producer") == "quant-strategy-kit" and self.initial_capital is not None
+                and self.daily["nav"].iloc[0] == 1)
 
 
 def load_run(spec, base):
@@ -143,6 +155,18 @@ def load_run(spec, base):
         raise ValueError(f"{label}本金应为正数。")
     if capital is not None and "equity" in d and not np.allclose(d["nav"] * float(capital), d["equity"], rtol=1e-7, atol=.01):
         raise ValueError(f"{label}本金、净值与权益不一致。")
+    if handoff.get("conventions", {}).get("opening_return") == "from_initial_capital":
+        if capital is None or "return" not in d or not np.isclose(d["return"].iloc[0], d["nav"].iloc[0] - 1,
+                                                               rtol=1e-7, atol=1e-9):
+            raise ValueError(f"{label}的建仓日前本金与首日收益不一致。")
+    if "transaction_cost" in d:
+        fee_columns = [key for key in ("commission", "slippage", "stamp_duty") if key in d]
+        for key in ["transaction_cost", *fee_columns]:
+            d[key] = pd.to_numeric(d[key], errors="raise")
+            if not np.isfinite(d[key]).all() or d[key].lt(0).any():
+                raise ValueError(f"{label}的交易费用需为有限非负数。")
+        if fee_columns and not np.allclose(d[fee_columns].sum(axis=1), d["transaction_cost"], rtol=1e-7, atol=.0001):
+            raise ValueError(f"{label}的每日费用分项与合计不一致。")
     tables, docs, hashes, notices = {}, {}, {}, []
     wanted = ["handoff.json", "strategy.json", SCENARIOS[scenario], "manifest.json"]
     if scenario == "strategy":

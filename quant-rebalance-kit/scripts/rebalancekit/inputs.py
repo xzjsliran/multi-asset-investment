@@ -24,6 +24,12 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False, default=str).encode()).hexdigest()
 
 
+def decision_digest(config):
+    # 账户关联的是持仓决策。费率进入本次确认摘要，无需因此重置上一次选股或大类目标。
+    rules = {key: value for key, value in config.items() if key not in {"transaction_costs", "cost_rate"}}
+    return digest(rules)
+
+
 def number(value, label, minimum=0.):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < minimum:
         raise ValueError(label + "须为有限非负数；所有资产只做多，现金不透支。")
@@ -96,8 +102,11 @@ def validate_inputs(config, account, request):
         r.setdefault(key, default)
         number(r[key], key)
     state = a.setdefault("strategy_state", {})
-    if state.get("strategy_digest") and state["strategy_digest"] != digest(c) and not r["initial_allocation"]:
-        raise ValueError("持仓关联的策略已变更，请确认新策略后明确是否重新配置。")
+    if state.get("strategy_digest") and not r["initial_allocation"]:
+        legacy = {key: value for key, value in c.items() if key != "transaction_costs"}
+        accepted = {decision_digest(c), digest(c), digest({**legacy, "cost_rate": 0})}
+        if state["strategy_digest"] not in accepted:
+            raise ValueError("持仓关联的策略已变更，请确认新策略后明确是否重新配置。")
     previous = state.get("previous_allocation")
     if previous is not None:
         if set(previous) != ids:
@@ -118,11 +127,14 @@ def validate_inputs(config, account, request):
 
 
 def review(config, account, request):
+    from strategykit.costs import costs_for
+
     c, a, r = validate_inputs(config, account, request)
     return {"schema_version": 1, "status": "awaiting_user_confirmation" if r["mode"] == "live" else "simulation",
             "context_digest": digest({"strategy": c, "account": a, "request": r}),
             "strategy": {"name": c["name"], "allocation_rebalance": c["allocation_rebalance"],
-                         "sleeves": c["sleeves"], "macro": c["macro"], "position_policy": "long_only"},
+                         "sleeves": c["sleeves"], "macro": c["macro"], "position_policy": "long_only",
+                         "transaction_costs": costs_for(c)},
             "account": a, "request": r,
             "confirmation_template": {"confirmed": False, "context_digest": digest({"strategy": c, "account": a, "request": r}),
                                       "confirmed_at": None, "user_statement": None}}

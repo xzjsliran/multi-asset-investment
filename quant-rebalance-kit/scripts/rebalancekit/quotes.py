@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import pandas as pd
 
+from strategykit.costs import ASSET_KINDS
 from .inputs import timestamp, number, currency
 
 
@@ -39,6 +40,8 @@ def validate_quotes(document, as_of, max_age_days):
             raise ValueError("报价晚于截止时间："+code)
         if not row.get("source"):
             raise ValueError("报价须注明来源："+code)
+        if row.get("kind") is not None and row["kind"] not in ASSET_KINDS:
+            raise ValueError("证券类型须为 stock、etf 或 us_etf："+code)
         for key in ["buy_lot", "sell_lot"]:
             if number(row.get(key), key) <= 0:
                 raise ValueError("买卖最小数量单位须为正；由实际产品规则提供。")
@@ -87,6 +90,7 @@ def extract_quotes(directory, codes, as_of, instrument_rules):
             px, available_at = float(row["close_raw"]), row["_known"].isoformat()
         quotes.append({"code": code, "price": px, "currency": cur, "available_at": available_at,
                        "execution_session": rule.get("execution_session"),
+                       "kind": rule.get("kind"),
                        "price_basis": "raw", "source": str(row.get("source", "quant-data-kit")),
                        "buy_lot": rule["buy_lot"], "sell_lot": rule["sell_lot"],
                        "tradable": str(row.get("tradable", True)).lower() in {"true", "1", "1.0"}})

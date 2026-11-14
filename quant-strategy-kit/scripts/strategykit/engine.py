@@ -1,12 +1,14 @@
-"""零交易成本的多资产日线回测；每个资产部分有自己的持仓与现金。"""
+"""多资产日线回测；每个资产部分有自己的持仓与现金。"""
 from __future__ import annotations
 
 import copy
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
 
 from .config import schedule, validate
+from .costs import COST_FIELDS, asset_kinds, charges_fees, costs_for, trade_cost
 from .decision import decide
 
 
@@ -17,6 +19,8 @@ def backtest(config, data):
     books = {sid: {"units": {}, "cash": 0.} for sid in ids}
     books["cash"]["cash"] = float(config["initial_capital"])
     capital = float(config["initial_capital"])
+    costs, kinds = costs_for(config), asset_kinds(config, data.features)
+    fee_enabled = charges_fees(costs)
     histories, weight_rows, trades, selections, audits, regimes, blocks, targets = [], [], [], [], [], [], [], []
     valuation_gaps = []
     prices = data.prices
@@ -50,6 +54,40 @@ def backtest(config, data):
     def rebalance_group(group, desired, px, day, signal, transfer):
         """先卖后买；总配置事件共享现金，单独选股只用该部分资金。"""
         before = {sid: values(sid, px) for sid in group}
+        blocked_sleeves = set()
+
+        def execute(sid, code, delta, fees, internal=False):
+            fee = sum(fees.values())
+            books[sid]["units"][code] = books[sid]["units"].get(code, 0.) + delta / px[code]
+            books[sid]["cash"] -= delta + fee
+            trades.append({"date": day, "signal_date": signal, "sleeve": sid, "code": code,
+                           "amount": delta, "side": "buy" if delta > 0 else "sell", "cost": fee,
+                           "internal_transfer": internal, **fees})
+
+        cost_day = str(day.date())
+        if transfer and fee_enabled:
+            # 同一证券在共享资金组内先转移份额，剩余买卖才按市场成交计费。
+            sellers, buyers = defaultdict(list), defaultdict(list)
+            for sid in group:
+                for code in sorted((set(before[sid]) | set(desired[sid])) - {"__cash__"}):
+                    delta = desired[sid].get(code, 0.) - before[sid].get(code, 0.)
+                    if abs(delta) > 1e-7 and bool(data.tradable.loc[day].get(code, False)):
+                        (buyers if delta > 0 else sellers)[code].append((sid, abs(delta)))
+            for code in sorted(sellers.keys() & buyers.keys()):
+                for seller, remaining in sellers[code]:
+                    for index, (buyer, wanted) in enumerate(buyers[code]):
+                        amount = min(remaining, wanted)
+                        if amount <= 1e-7:
+                            continue
+                        zero = dict.fromkeys(COST_FIELDS, 0.)
+                        # 内部划转的现金对价由随后共享资金的分配统一处理。
+                        execute(seller, code, -amount, zero, internal=True)
+                        execute(buyer, code, amount, zero, internal=True)
+                        buyers[code][index] = (buyer, wanted - amount)
+                        remaining -= amount
+                        if remaining <= 1e-7:
+                            break
+            before = {sid: values(sid, px) for sid in group}
         for sid in group:
             for code in sorted(set(before[sid]) | set(desired[sid])):
                 delta = desired[sid].get(code, 0.) - before[sid].get(code, 0.)
@@ -57,19 +95,31 @@ def backtest(config, data):
                     continue
                 if not bool(data.tradable.loc[day].get(code, False)):
                     blocks.append({"date": day, "sleeve": sid, "code": code, "side": "sell", "reason": "无当日可交易报价", "amount": -delta})
+                    blocked_sleeves.add(sid)
                     continue
-                books[sid]["units"][code] = books[sid]["units"].get(code, 0.) + delta / px[code]
-                books[sid]["cash"] -= delta
-                trades.append({"date": day, "signal_date": signal, "sleeve": sid, "code": code, "amount": delta, "side": "sell", "cost": 0.})
+                execute(sid, code, delta, trade_cost(costs, delta, kinds.get(code), cost_day))
         if transfer:
             liquid = sum(books[sid]["cash"] for sid in group)
-            needs = {sid: max(0., desired[sid].get("__cash__", 0.) + sum(max(0., v - values(sid, px).get(code, 0.))
-                     for code, v in desired[sid].items() if code != "__cash__")) for sid in group}
+            reserve = {sid: desired[sid].get("__cash__", 0.) for sid in group}
+            # 含费用时先保留目标现金，零费用沿用原来的资金分配口径。
+            priority = reserve if fee_enabled else dict.fromkeys(group, 0.)
+            needs = {sid: reserve[sid] - priority[sid] for sid in group}
+            for sid in group:
+                current = values(sid, px)
+                for code, target in desired[sid].items():
+                    if code == "__cash__":
+                        continue
+                    amount = max(0., target - current.get(code, 0.))
+                    needs[sid] += amount + sum(trade_cost(costs, amount, kinds.get(code), cost_day).values())
+            reserve_total = sum(priority.values())
+            budget = max(0., liquid - reserve_total)
+            reserve_ratio = min(1., liquid / reserve_total) if reserve_total else 1.
             total = sum(needs.values())
             for sid in group:
-                books[sid]["cash"] = liquid * needs[sid] / total if total > 1e-9 else 0.
+                buy_cash = budget * needs[sid] / total if total > 1e-9 else 0.
+                books[sid]["cash"] = priority[sid] * reserve_ratio + buy_cash
             if total <= 1e-9:
-                books["cash"]["cash"] = liquid
+                books["cash"]["cash"] += budget
         for sid in group:
             current = values(sid, px)
             buys = {code: max(0., target - current.get(code, 0.)) for code, target in desired[sid].items() if code != "__cash__"}
@@ -79,25 +129,29 @@ def backtest(config, data):
                     continue
                 if code not in px or not np.isfinite(px[code]) or not bool(data.tradable.loc[day].get(code, False)):
                     blocks.append({"date": day, "sleeve": sid, "code": code, "side": "buy", "reason": "无当日可交易报价", "amount": amount})
+                    blocked_sleeves.add(sid)
                 else:
                     available_buys[code] = amount
             spendable = max(0., books[sid]["cash"] - desired[sid].get("__cash__", 0.))
-            ratio = min(1., spendable / sum(available_buys.values())) if available_buys else 0.
+            buy_costs = {code: trade_cost(costs, amount, kinds.get(code), cost_day)
+                         for code, amount in available_buys.items()}
+            wanted = sum(amount + sum(buy_costs[code].values()) for code, amount in available_buys.items())
+            ratio = min(1., spendable / wanted) if wanted > 0 else 0.
             for code, amount in available_buys.items():
                 delta = amount * ratio
                 if delta > 1e-7:
-                    books[sid]["units"][code] = books[sid]["units"].get(code, 0.) + delta / px[code]
-                    books[sid]["cash"] -= delta
-                    trades.append({"date": day, "signal_date": signal, "sleeve": sid, "code": code, "amount": delta, "side": "buy", "cost": 0.})
+                    execute(sid, code, delta, {key: value * ratio for key, value in buy_costs[code].items()})
             after = values(sid, px)
             unresolved = any(abs(desired[sid].get(code, 0.) - after.get(code, 0.)) > .01
                              for code in set(after) | set(desired[sid]) if code != "__cash__")
-            if unresolved:
+            # 费用造成的目标差额在本次已接受。仅将有交易障碍的目标留待后续执行。
+            if unresolved and (blocked_sleeves or not fee_enabled):
                 pending[sid] = (dict(desired[sid]), signal)
             else:
                 pending.pop(sid, None)
 
     for day in days:
+        first_trade = len(trades)
         px = marked.loc[day]
         index = prices.index.get_loc(day)
         for sid in ids:
@@ -112,8 +166,6 @@ def backtest(config, data):
         nav = sum(pre.values())
         # 每日盈亏由前一天持仓产生；收盘调仓不获得本日已经发生的涨幅。
         pnl = {sid: pre[sid] - previous_values[sid] for sid in ids}
-        for sid in ids:
-            contributions[sid] += pnl[sid]
         if previous_px is not None:
             replay = sum(units * (px[code] - previous_px[code]) for sid in ids
                          for code, units in books[sid]["units"].items() if units > 1e-12)
@@ -145,9 +197,17 @@ def backtest(config, data):
                 desired, signal = pending[sid]
                 rebalance_group([sid], {sid: desired}, px, day, signal, False)
         post = {sid: sum(values(sid, px).values()) + books[sid]["cash"] for sid in ids}
-        if abs(sum(post.values()) - nav) > 1e-5 or min(books[sid]["cash"] for sid in ids) < -1e-5:
-            raise AssertionError("零费用调仓必须保持总资金，现金不能为负。")
+        day_costs = dict.fromkeys(COST_FIELDS, 0.)
+        for fill in trades[first_trade:]:
+            pnl[fill["sleeve"]] -= fill["cost"]
+            for field in COST_FIELDS:
+                day_costs[field] += fill[field]
+        cost = sum(day_costs.values())
+        if abs(sum(post.values()) + cost - nav) > 1e-5 or min(books[sid]["cash"] for sid in ids) < -1e-5:
+            raise AssertionError("调仓后权益加交易成本须还原调仓前权益，现金不能为负。")
+        nav = sum(post.values())
         for sid in ids:
+            contributions[sid] += pnl[sid]
             books[sid]["cash"] = max(0., books[sid]["cash"])
             for code, units in books[sid]["units"].items():
                 if not np.isfinite(units) or units < -1e-9:
@@ -155,6 +215,7 @@ def backtest(config, data):
                 books[sid]["units"][code] = max(0., units)
         histories.append({"date": day, "nav": nav / capital, "equity": nav,
                           "return": nav / previous_nav - 1, "cash_weight": sum(books[sid]["cash"] for sid in ids) / nav,
+                          "transaction_cost": cost, **day_costs,
                           **{f"pnl_{sid}": pnl[sid] for sid in ids}})
         for sid in ids:
             for code, amount in {**values(sid, px), "CASH": books[sid]["cash"]}.items():

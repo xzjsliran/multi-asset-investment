@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 
-def analyse_risk(daily, names):
+def analyse_risk(daily, names, opening_capital=None):
     cols = [c for c in daily if c.startswith("pnl_")]
     empty = {"status":"unavailable", "rows":[], "correlations":[], "annual_volatility":None,
              "reason":"需要各资产部分逐日盈亏与账户权益。"}
@@ -12,9 +12,16 @@ def analyse_risk(daily, names):
     d = daily.reset_index(drop=True)
     if not np.isfinite(d[cols].to_numpy(dtype=float)).all():
         raise ValueError("风险贡献所需逐日盈亏包含空值或无效数值。")
-    parts = d[cols].astype(float).div(d["equity"].shift(), axis=0)
-    parts.iloc[0] = 0.  # 与报告共同起点的零收益口径一致。
-    total = d["nav"].pct_change(fill_method=None).fillna(0).to_numpy()
+    previous_equity = d["equity"].shift()
+    if opening_capital is not None:
+        previous_equity.iloc[0] = opening_capital
+    parts = d[cols].astype(float).div(previous_equity, axis=0)
+    first_return = 0.
+    if opening_capital is None:
+        parts.iloc[0] = 0.
+    else:
+        first_return = d["equity"].iloc[0] / opening_capital - 1
+    total = d["nav"].pct_change(fill_method=None).fillna(first_return).to_numpy()
     if not np.isfinite(parts.to_numpy()).all() or not np.allclose(parts.sum(axis=1), total, atol=1e-9, rtol=1e-7):
         raise ValueError("逐日资产盈亏无法还原组合收益，不能计算风险贡献。")
     cov = parts.cov().to_numpy()
@@ -34,8 +41,9 @@ def analyse_risk(daily, names):
                      "correlation":float(corr.loc[a,b]) if pd.notna(corr.loc[a,b]) else None}
                     for i,a in enumerate(cols) for b in cols[i+1:]]
     return {"status":"ok" if variance > 1e-20 else "zero_volatility", "rows":rows, "correlations":correlations,
-            "annual_volatility":vol, "observations":len(d), "return_intervals":len(d)-1,
+            "annual_volatility":vol, "observations":len(d),
+            "return_intervals":len(d) - (opening_capital is None),
             "start":str(pd.Timestamp(d.date.iloc[0]).date()), "end":str(pd.Timestamp(d.date.iloc[-1]).date()),
-            "definition":"分部分日收益贡献=当日盈亏/上一日组合权益；波动贡献=Cov(该贡献,组合日收益)/组合日波动×√252。共同起点记零收益。",
+            "definition":"分部分日收益贡献=当日盈亏/上一日组合权益。波动贡献=Cov(该贡献,组合日收益)/组合日波动×√252。建仓日起算时首日基数为建仓前本金。",
             "correlation_definition":"各资产部分对组合的日收益贡献序列相关性，包含持仓变化影响；零波动序列不定义相关性。",
             "note":"波动贡献合计为组合年化波动率；风险占比合计为100%。负风险贡献表示分散效果，可能出现在只做多组合中，不表示空头。零波动时占比不定义。"}

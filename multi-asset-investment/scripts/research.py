@@ -109,6 +109,14 @@ def save_task(path, config, request, root, parent=None, change=None):
     return task
 
 
+def missing_costs(config, task):
+    from strategykit.costs import cost_confirmation_needed, cost_question
+
+    if cost_confirmation_needed(config) and "cost_rate" not in task["request"]["specified"]:
+        return cost_question()
+    return None
+
+
 def load_task(path):
     task = read_json(path / "task.json")
     if task.get("schema_version") != 1 or task.get("strategy_file") != "strategy.json":
@@ -128,8 +136,9 @@ def revise_task(parent, path, patch, root, allow_unchanged=False):
     old_task = load_task(parent)
     if not isinstance(patch, dict) or not patch:
         raise ValueError("修订须为非空 JSON 对象。")
-    if set(patch) - {"request", "start", "end", "allocation_rebalance", "sleeve_rebalance"}:
-        raise ValueError("修订支持研究需求、起止日、大类调仓和指定资产部分的内部调仓。")
+    fields = ("start", "end", "allocation_rebalance", "transaction_costs")
+    if set(patch) - {*fields, "request", "sleeve_rebalance"}:
+        raise ValueError("修订支持研究需求、起止日、大类或内部调仓频率及交易费用。")
     request_changes = patch.get("request", {})
     if not isinstance(request_changes, dict):
         raise ValueError("request 修订须为 JSON 对象。")
@@ -144,11 +153,15 @@ def revise_task(parent, path, patch, root, allow_unchanged=False):
     specified = list(specified)
     config = read_json(parent / "strategy.json")
     before = deepcopy(config)
-    for key in ("start", "end", "allocation_rebalance"):
+    for key in fields:
         if key in patch:
             config[key] = patch[key]
             request["defaults"].pop(key, None)
             specified.append(key)
+    if "transaction_costs" in patch:
+        config.pop("cost_rate", None)
+        request["defaults"].pop("cost_rate", None)
+        specified = [key for key in specified if key != "cost_rate"]
     changes = patch.get("sleeve_rebalance", {})
     if not isinstance(changes, dict):
         raise ValueError("sleeve_rebalance 须以资产部分 id 为键。")
@@ -170,8 +183,8 @@ def revise_task(parent, path, patch, root, allow_unchanged=False):
     request["specified"] = sorted(set(specified) - request["defaults"].keys())
     config = validate(config)
     config_changes = {
-        key: {"from": before[key], "to": config[key]}
-        for key in ("start", "end", "allocation_rebalance") if before[key] != config[key]
+        key: {"from": before.get(key), "to": config.get(key)}
+        for key in fields if before.get(key) != config.get(key)
     }
     config_changes.update(sleeve_changes)
     if not config_changes:
@@ -197,6 +210,8 @@ def check_task(task_path, data_path, out=None, expected_data=None, require_bench
     if task["missing"]:
         return {"status": "needs_input", "missing": task["missing"], "next_action": "clarify_research_request"}
     config = read_config(task_path / "strategy.json")
+    if out and (issue := missing_costs(config, task)):
+        return issue
     task_digest = file_sha256(task_path / "task.json")
     fingerprints = input_fingerprints(data_path) if out or expected_data is not None else {}
     if expected_data is not None and fingerprints != expected_data:

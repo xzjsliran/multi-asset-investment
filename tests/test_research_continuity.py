@@ -45,6 +45,32 @@ class ResearchContinuity(unittest.TestCase):
             self.cli("report", *run["report_args"])
         return run
 
+    def test_resume_requests_costs_then_keeps_monthly_revision_and_opening_fees(self):
+        cfg = read_json(self.path / "strategy.json")
+        cfg.pop("transaction_costs")
+        write_json(self.path / "implicit.json", {**cfg, "cost_rate": 0})
+        self.task(config="implicit.json")
+        self.cli("research", "track", "--task", "task-old", "--data", "normal")
+        self.assertTrue(self.cli("research", "resume")["conditions"]["run1"]["cost_confirmation_needed"])
+        blocked = self.cli("research", "continue", "--changes", "monthly.json")
+        self.assertEqual(blocked["next_action"], "confirm_transaction_costs")
+        self.assertIsNone(blocked["sources"]["run1"]["run"])
+        self.assertIsNone(blocked["report"])
+        self.assertIn("simulation_reference", blocked["issue"]["simulation_examples"])
+        write_json(self.path / "confirmed.json", {"transaction_costs": {"commission_rate": .00015, "slippage_rate": .00015}})
+        done = self.cli("research", "continue", "--changes", "confirmed.json")
+        self.assertEqual(done["status"], "completed")
+        self.assertEqual(done["conditions"]["run1"]["allocation_rebalance"], "monthly")
+        path = self.path / done["report"]
+        report = read_json(path / "report_data.json")
+        self.assertIn("建仓前本金", report["period"]["anchor"])
+        for item in report["strategies"]:
+            self.assertGreater(item["detail"]["transaction_cost"], 0)
+            self.assertLess(next(row["nav"] for row in report["curves"] if row["strategy_id"] == item["id"]), 1)
+        self.cli("report", "check", "--report-dir", path)
+        repeated = self.cli("research", "continue", "--changes", "confirmed.json")
+        self.assertEqual(repeated["report"], done["report"])
+
     def test_fresh_session_continues_one_run_with_two_selected_scenarios(self):
         self.task()
         old = self.old_run()

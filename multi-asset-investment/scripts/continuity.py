@@ -9,7 +9,7 @@ import sys
 
 from research import (
     COMPLETED_RUNS, check_run_output, check_task, check_work_dir,
-    file_sha256, input_fingerprints, load_task, read_json, revise_task, timestamp, write_new,
+    file_sha256, input_fingerprints, load_task, missing_costs, read_json, revise_task, timestamp, write_new,
 )
 
 
@@ -204,6 +204,8 @@ def track(workspace, tasks=(), runs=(), data=None, report=None):
 
 
 def status(workspace, study):
+    from strategykit.costs import costs_for
+
     version = study["revisions"][-1]
     history = [
         {key: earlier[key] for key in ("version", "stage", "status", "report", "changes")}
@@ -213,11 +215,14 @@ def status(workspace, study):
     for key, source in version["sources"].items():
         task, details = checked_task(workspace, source)
         config = read_json(task / "strategy.json")
+        unresolved_cost = bool(missing_costs(config, details))
         conditions[key] = {
             "request": details["request"],
             "start": config["start"], "end": config["end"],
             "allocation_rebalance": config["allocation_rebalance"],
             "sleeve_rebalance": {sleeve["id"]: sleeve["rebalance"] for sleeve in config["sleeves"]},
+            "transaction_costs": None if unresolved_cost else costs_for(config),
+            "cost_confirmation_needed": unresolved_cost,
         }
     issue = version["issue"]
     next_action = issue["next_action"] if issue else (
@@ -287,6 +292,8 @@ def prepare_revision(workspace, study, changes, data, root):
                 comparison[key] = changes[key]
         if "metrics" in request_changes:
             comparison["metrics"] = request_changes["metrics"]
+    if not changes and previous["stage"] != "report_saved":
+        changes = previous["changes"]
     return add_revision(workspace, study, sources, comparison, changes, directory=directory)
 
 
@@ -314,6 +321,9 @@ def run_source(workspace, study, source, key, root):
         # 已登记的产物可能被移走。用任务和同一数据重新生成，保留已有文件。
         source.update(run_status=None, run=None)
         version.update(stage="tasks_saved", report=None)
+    cost_issue = missing_costs(read_json(task / "strategy.json"), request)
+    if cost_issue:
+        return cost_issue
     if source["data"] is None:
         return {"status": "needs_input", "next_action": "supply_data", "message": "请提供标准数据目录。"}
     data = (workspace / source["data"]).resolve()
@@ -395,9 +405,14 @@ def build_report(workspace, study, root):
 
 def continue_study(workspace, study, changes, data, root):
     version = study["revisions"][-1]
-    if version["stage"] == "report_saved" and changes is None and data is None:
+    if (version["issue"] or {}).get("next_action") == "confirm_transaction_costs" and set(changes or {}) == {"transaction_costs"}:
+        changes = {**(version["changes"] or {}), **changes}
+    same_changes = changes is not None and all(
+        (version["changes"] or {}).get(key) == value for key, value in changes.items()
+    )
+    if version["stage"] == "report_saved" and (changes is None or same_changes) and data is None:
         return status(workspace, study)
-    new_settings = changes is not None and changes != version["changes"]
+    new_settings = changes is not None and not same_changes
     new_snapshot = data is not None and any(
         source["run_status"] in COMPLETED_RUNS and source["input_fingerprints"] != data[1]
         for source in version["sources"].values()
@@ -412,6 +427,14 @@ def continue_study(workspace, study, changes, data, root):
     record_data_versions(workspace, version["sources"])
     version.update(status="running", issue=None)
     save(workspace, study)
+    # 多方案先确认共同的费用假设，避免只跑完其中一项才询问。
+    for key, source in version["sources"].items():
+        if source["run_status"] in COMPLETED_RUNS:
+            continue
+        task, request = checked_task(workspace, source)
+        issue = missing_costs(read_json(task / "strategy.json"), request)
+        if issue:
+            return pending(workspace, study, {**issue, "source": key})
     for key, source in version["sources"].items():
         try:
             issue = run_source(workspace, study, source, key, root)

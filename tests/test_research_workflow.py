@@ -36,6 +36,8 @@ def fixture(directory):
         "start": "2025-01-01",
         "end": "2025-07-31",
         "allocation_rebalance": "quarterly",
+        "transaction_costs": {"commission_rate": 0., "slippage_rate": 0., "stamp_duty_rate": 0.,
+                              "by_kind": {}, "stamp_duty_schedule": []},
         "sleeves": [
             {"id": "a", "name": "债券", "weight": .5, "assets": [{"code": "ETF_A", "kind": "etf"}]},
             {"id": "b", "name": "权益", "weight": .5, "assets": [{"code": "ETF_B", "kind": "etf"}]},
@@ -53,7 +55,7 @@ def fixture(directory):
         "objective": "比较固定比例与风险平价的区间回撤",
         "metrics": ["max_drawdown"],
         "comparison": "standard",
-        "defaults": {"initial_capital": "统一示例本金", "cost_rate": "零成本模拟"},
+        "defaults": {"initial_capital": "统一示例本金"},
     })
     for name in ("normal", "short_history", "fallback"):
         target = directory / name

@@ -11,7 +11,7 @@ import pandas as pd
 from pathlib import Path
 
 from .inputs import read_json, write_json
-from .reporting import client_text, default_name, INTERNAL
+from .reporting import client_text, cost_text, default_name, INTERNAL
 from .analysis import selection_text, weighting_text, macro_text
 
 
@@ -39,14 +39,24 @@ def validate_plan(p):
     equity = p["account"]["equity_cny"]
     if not math.isfinite(equity) or equity <= 0:
         raise ValueError("账户总资产无效。")
+    costs = p.get("transaction_costs", {})
+    cost_fields = ("commission", "slippage", "stamp_duty")
+    estimated_cost = costs.get("estimated_total_cny", 0.)
+    projected_equity = p["account"].get("projected_equity_cny", equity)
+    nonnegative(estimated_cost, "预计费用")
+    if not math.isfinite(projected_equity) or projected_equity <= 0 or abs(projected_equity + estimated_cost - equity) > .01:
+        raise ValueError("预计调整后权益及费用与原账户权益不一致。")
     current_cash = sum(x["amount"]*p["fx"][x["currency"]] for x in p["cash_before"])
     projected_cash = sum(x["amount"]*p["fx"][x["currency"]] for x in p["cash_after"])
     if abs(current_cash-p["account"]["cash_before_cny"]) > .01 or abs(projected_cash-p["account"]["cash_after_cny"]) > .01:
         raise ValueError("账户概要的现金与分币种现金不一致。")
-    for value in [sum(x["current_value_cny"] for x in p["holdings"])+current_cash,
-                  sum(x["projected_value_cny"] for x in p["holdings"])+projected_cash,
-                  sum(x["target_value_cny"] for x in p["targets"])]:
-        if abs(value-equity) > max(1., equity)*1e-8:
+    account_values = [
+        (sum(x["current_value_cny"] for x in p["holdings"]) + current_cash, equity),
+        (sum(x["projected_value_cny"] for x in p["holdings"]) + projected_cash, projected_equity),
+        (sum(x["target_value_cny"] for x in p["targets"]), equity),
+    ]
+    for value, expected in account_values:
+        if abs(value - expected) > max(1., equity)*1e-8:
             raise ValueError("计划金额加总与账户总资产不一致。")
     if abs(sum(x["target_weight"] for x in p["targets"])-1) > 1e-8:
         raise ValueError("计划目标权重未加总为100%。")
@@ -64,7 +74,8 @@ def validate_plan(p):
     for row in p["holdings"]:
         for state in ["current", "projected"]:
             value = row[state+"_quantity"]*quotes[row["code"]]["price_cny"]
-            if abs(value-row[state+"_value_cny"]) > .01 or abs(value/equity-row[state+"_weight"]) > 1e-8:
+            denominator = equity if state == "current" else projected_equity
+            if abs(value-row[state+"_value_cny"]) > .01 or abs(value/denominator-row[state+"_weight"]) > 1e-8:
                 raise ValueError("持仓数量、金额与权重不一致。")
         if "current_available_quantity" in row:
             nonnegative(row["current_available_quantity"], "当前可卖数量")
@@ -73,6 +84,7 @@ def validate_plan(p):
     for row in p["targets"]:
         if abs(row["target_value_cny"]/equity-row["target_weight"]) > 1e-8:
             raise ValueError("目标金额与目标权重不一致。")
+    fees_cny = defaultdict(float)
     for row in p["orders"]:
         nonnegative(row["quantity"], "买卖数量")
         if row["code"] in orders or row["side"] not in {"buy", "sell"}:
@@ -87,7 +99,25 @@ def validate_plan(p):
         held = [x for x in p["holdings"] if x["code"] == row["code"]]
         if signed < 0 and all("current_available_quantity" in x for x in held) and -signed > sum(x["current_available_quantity"] for x in held)+1e-8:
             raise ValueError("拟卖出数量超过可卖持仓。")
-        cash_changes[row["currency"]] -= signed*q["price"]
+        native_cost = row.get("estimated_cost_native", row.get("estimated_cost", 0.))
+        nonnegative(native_cost, "订单费用")
+        if costs:
+            components = {key: row[f"{key}_native"] for key in cost_fields}
+            for key, amount in components.items():
+                nonnegative(amount, "订单费用分项")
+                fees_cny[key] += amount * p["fx"][row["currency"]]
+            if abs(sum(components.values()) - native_cost) > .01 or abs(
+                native_cost * p["fx"][row["currency"]] - row["estimated_cost_cny"]
+            ) > .01:
+                raise ValueError("订单费用分项或换算金额不一致。")
+        cash_change = -signed*q["price"] - native_cost
+        if abs(cash_change - row.get("estimated_cash_change_native", cash_change)) > .01:
+            raise ValueError("订单净现金变化与费用不一致。")
+        cash_changes[row["currency"]] += cash_change
+    if costs and (abs(estimated_cost - sum(fees_cny.values())) > .01 or any(
+        abs(costs[f"{key}_cny"] - fees_cny[key]) > .01 for key in cost_fields
+    )):
+        raise ValueError("计划费用分项与订单加总不一致。")
     if any(abs(changes[code]-orders.get(code, 0.)) > 1e-7 for code in set(changes) | set(orders)):
         raise ValueError("拟交易清单不能还原调整后数量。")
     for cur in p["fx"]:
@@ -129,21 +159,31 @@ def export_rebalance(directory, out):
     status = {"preliminary": "调仓预案 · 信号日更新", "constrained": "调仓计划 · 存在执行约束", "calculated": "调仓计划"}[p["status"]]
     nature = "历史模拟账户" if p["mode"] == "simulation" else "已确认实际持仓"
     event_text = "初始配置" if p["action"] == "initial_allocation" else ("大类资产配置调整" if p["event"]["is_outer"] else ("、".join(names[sid] for sid in p["event"]["selection_sleeves"])+"内部调仓" if p["event"]["selection_sleeves"] else "本日未触发调仓，维持持仓"))
-    summary = f"{timing['execution_date']}拟执行{event_text}。参考总资产{fmt(p['account']['equity_cny'])}元，调整后预计现金{fmt(p['account']['cash_after_cny'])}元。所有资产只做多。"
+    costs = p.get("transaction_costs", {})
+    summary = (f"{timing['execution_date']}拟执行{event_text}。参考总资产{fmt(p['account']['equity_cny'])}元，"
+               f"预计费用{fmt(costs.get('estimated_total_cny', 0))}元，调整后预计现金{fmt(p['account']['cash_after_cny'])}元。")
     overview = [["策略名称", name], ["账户性质", nature], ["持仓记录时间", display_time(timing["holdings_as_of"])],
                 ["策略与持仓确认", "历史模拟账户" if p["mode"] == "simulation" else display_time(p["confirmation"]["confirmed_at"])],
                 ["数据截止时间", display_time(timing["as_of"])], ["本次采用的信号日", timing["signal_date"]],
                 ["计划信号日", timing["scheduled_signal_date"]], ["拟执行日期", timing["execution_date"]],
-                ["计划状态", status], ["交易成本率", "0%"], ["持仓方向", "全部资产只做多，现金不透支"]]
+                ["计划状态", status], ["费率假设", cost_text({"transaction_costs": costs["policy"]}) if costs else "原计划按零成本估算"],
+                ["预计费用分项（元）", "，".join(f"{label} {fmt(costs.get(key, 0))}" for key, label in
+                                             [("commission_cny", "佣金"), ("slippage_cny", "滑点"), ("stamp_duty_cny", "印花税")])],
+                ["预计调整后权益（元）", fmt(p["account"].get("projected_equity_cny", p["account"]["equity_cny"]))],
+                ["持仓方向", "全部资产只做多，现金不透支"]]
     allocations = []
     for sid in names:
         before = sum(x["current_value_cny"] for x in p["holdings"] if x["sleeve"] == sid)+sum(x["amount"]*p["fx"][x["currency"]] for x in p["cash_before"] if x["sleeve"] == sid)
         after = sum(x["projected_value_cny"] for x in p["holdings"] if x["sleeve"] == sid)+sum(x["amount"]*p["fx"][x["currency"]] for x in p["cash_after"] if x["sleeve"] == sid)
         target = sum(x["target_value_cny"] for x in p["targets"] if x["sleeve"] == sid)
         equity = p["account"]["equity_cny"]
-        allocations.append([names[sid], pct(before/equity), pct(target/equity), pct(after/equity), fmt(after-target)])
+        after_equity = p["account"].get("projected_equity_cny", equity)
+        allocations.append([names[sid], pct(before/equity), pct(target/equity), pct(after/after_equity), fmt(after-target)])
     order_rows = [[asset_names.get(x["code"], x["code"]), x["code"], "买入" if x["side"] == "buy" else "卖出", qty(x["quantity"]),
-                   f"{x['reference_price']:,.4f}", x["currency"], fmt(x["amount_native"]), fmt(x["amount_cny"]), display_time(x["price_available_at"])] for x in p["orders"]]
+                   f"{x['reference_price']:,.4f}", x["currency"], fmt(x["amount_native"]), fmt(x["amount_cny"]),
+                   fmt(x.get("estimated_cost_native", 0)), fmt(x["estimated_cash_change_native"]), display_time(x["price_available_at"])] for x in p["orders"]]
+    order_headers = ["资产", "代码", "方向", "预计数量", "参考单价", "币种", "预计原币金额", "折合人民币（元）",
+                     "预计费用（原币）", "净现金变化（原币）", "报价可用时间"]
     holdings = [[names[x["sleeve"]], asset_names.get(x["code"], x["code"]), x["code"], qty(x["current_quantity"]), qty(x["projected_quantity"]),
                  pct(x["current_weight"]), pct(x["target_weight"]), pct(x["projected_weight"])] for x in p["holdings"]]
     reasons = [[names[s["id"]], selection_text(s["selection"]), weighting_text(s["weighting"])] for s in c["sleeves"]]
@@ -185,20 +225,20 @@ def export_rebalance(directory, out):
         sections.append(f'<section id="{sid}"><h2>{esc(heading)}</h2>{content}</section>')
     add("summary", '<p>'+esc(summary)+'</p>'+table(["项目", "内容"], overview))
     add("allocation", table(["资产部分", "当前比例", "目标比例", "预计调整后比例", "偏离目标金额（元）"], allocations)+'<p class="note">资产部分比例包含该部分保留的现金；预计调整后比例已考虑可卖数量、交易单位和分币种资金约束。</p>')
-    add("orders", table(["资产", "代码", "方向", "预计数量", "参考单价", "币种", "预计原币金额", "折合人民币（元）", "报价可用时间"], order_rows, "本次没有拟交易指令")+'<p class="note">先卖后买；同一证券按账户净额列示。所列数量和金额为参考价估算。</p>')
+    add("orders", table(order_headers, order_rows, "本次没有拟交易指令")+'<p class="note">先卖后买。同一证券按账户净额列示。所列数量、金额及费用均为参考价估算。</p>')
     add("holdings", table(["资产部分", "资产", "代码", "当前数量", "预计调整后数量", "当前权重", "目标权重", "预计调整后权重"], holdings))
     audit_headers = ["资产部分", "配权方法", "样本起始日", "样本截止日", "共同收益样本数", "本次计算状态", "说明"]
     risk_headers = ["资产部分","目标权重","估计风险贡献占比","估计年化波动贡献（百分点）"]
     add("rationale", '<p>'+esc(conditions)+'</p>'+table(["资产部分", "选择规则", "配权方法"], reasons)+table(audit_headers, audit_rows, "本次无需更新组合内部配权")+("<h3>目标配置风险估计</h3>"+table(risk_headers,risk_rows)+'<p class="note">'+esc(risk_note)+'</p>' if risk_rows else ''))
     add("constraints", table(["资产部分", "代码", "事项"], issues, "未识别到额外执行约束")+(table(funding_headers, funding) if funding else '')+table(["币种", "预计剩余现金"], [[cur, fmt(v)] for cur, v in sorted(cash.items())])+'<ul>'+''.join('<li>'+esc(n)+'</li>' for n in p["notes"])+'</ul>')
     add("calendar", table(["信号日", "拟执行日", "事件", "更新内部配置的资产部分"], calendars, "请补充后续交易日历"))
-    style = '''*{box-sizing:border-box}body{margin:0;background:#f2f4f7;color:#172b44;font:15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}main{max-width:1280px;margin:36px auto;padding:40px;background:white;border-top:6px solid #153e65}header{border-bottom:1px solid #ccd6e1;padding-bottom:22px}h1{font-size:32px;margin:4px 0}h2{font-size:21px;border-left:4px solid #b58c49;padding-left:12px;margin:32px 0 16px}.tag{font-size:13px;letter-spacing:1px;color:#63748a}.sub{font-size:17px;color:#425874}p{margin:10px 0}.table-wrap{overflow-x:auto;margin:12px 0}table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}th{background:#edf2f7;color:#254262;text-align:left;font-weight:600}td,th{padding:10px 12px;border-bottom:1px solid #e0e6ed;vertical-align:top}td{white-space:nowrap}section#rationale td,section#constraints td,section#summary td{white-space:normal}section#rationale table{min-width:760px}section#rationale td:first-child,section#rationale th:first-child{min-width:100px;white-space:nowrap}tr:nth-child(even){background:#f8fafc}.note,footer{font-size:12px;color:#64748b}footer{border-top:1px solid #dce3eb;margin-top:32px;padding-top:16px}ul{padding-left:20px}@media(max-width:640px){main{margin:0;padding:20px 16px}h1{font-size:26px}h2{font-size:19px}td,th{padding:8px}}@media print{body{background:#fff}main{margin:0;max-width:none;padding:15px}table{font-size:10px}td,th{white-space:normal;padding:5px}section{break-inside:avoid}}'''
+    style = '''*{box-sizing:border-box}body{margin:0;background:#f2f4f7;color:#172b44;font:15px/1.65 "Times New Roman","SimSun","宋体",serif}main{max-width:1280px;margin:36px auto;padding:40px;background:white;border-top:6px solid #153e65}header{border-bottom:1px solid #ccd6e1;padding-bottom:22px}h1{font-size:32px;margin:4px 0}h2{font-size:21px;border-left:4px solid #b58c49;padding-left:12px;margin:32px 0 16px}.tag{font-size:13px;letter-spacing:1px;color:#63748a}.sub{font-size:17px;color:#425874}p{margin:10px 0}.table-wrap{overflow-x:auto;margin:12px 0}table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}th{background:#edf2f7;color:#254262;text-align:left;font-weight:600}td,th{padding:10px 12px;border-bottom:1px solid #e0e6ed;vertical-align:top}td{white-space:nowrap}section#rationale td,section#constraints td,section#summary td{white-space:normal}section#rationale table{min-width:760px}section#rationale td:first-child,section#rationale th:first-child{min-width:100px;white-space:nowrap}tr:nth-child(even){background:#f8fafc}.note,footer{font-size:12px;color:#64748b}footer{border-top:1px solid #dce3eb;margin-top:32px;padding-top:16px}ul{padding-left:20px}@media(max-width:640px){main{margin:0;padding:20px 16px}h1{font-size:26px}h2{font-size:19px}td,th{padding:8px}}@media print{body{background:#fff}main{margin:0;max-width:none;padding:15px}table{font-size:10px}td,th{white-space:normal;padding:5px}section{break-inside:avoid}}'''
     document = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><link rel="icon" href="data:,"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+'</title><style>'+style+'</style><main><header><div class="tag">组合管理 · '+esc(nature)+'</div><h1>'+esc(title)+'</h1><div class="sub">'+esc(name)+'</div><p>'+esc(status+' ｜ 拟执行日 '+timing['execution_date'])+'</p></header>'+''.join(sections)+'<footer>计价币种：人民币；证券参考价及现金按原币列示。时间统一按北京时间列示。报告据本次计算结果生成。</footer></main></html>'
     def mdtable(headers, rows):
         clean = lambda v: str(v).replace('|', '\\|').replace('\n', ' ')
         return '| '+' | '.join(headers)+' |\n| '+' | '.join('---' for _ in headers)+' |\n'+'\n'.join('| '+' | '.join(clean(v) for v in row)+' |' for row in rows)
     md = f"# {title}\n\n{name} · {nature} · {status}\n\n{summary}\n\n时间统一按北京时间列示。\n\n"
-    for heading, headers, rows in [("计划概要",["项目","内容"],overview),("资产配置调整",["资产部分","当前比例","目标比例","预计调整后比例","偏离目标金额（元）"],allocations),("拟交易清单",["资产","代码","方向","预计数量","参考单价","币种","预计原币金额","折合人民币（元）","报价可用时间"],order_rows),("持仓调整明细",["资产部分","资产","代码","当前数量","预计调整后数量","当前权重","目标权重","预计调整后权重"],holdings),("配置依据",["资产部分","选择规则","配权方法"],reasons),("执行约束与待处理事项",["资产部分","代码","事项"],issues),("后续调仓日历",["信号日","拟执行日","事件","资产部分"],calendars)]:
+    for heading, headers, rows in [("计划概要",["项目","内容"],overview),("资产配置调整",["资产部分","当前比例","目标比例","预计调整后比例","偏离目标金额（元）"],allocations),("拟交易清单",order_headers,order_rows),("持仓调整明细",["资产部分","资产","代码","当前数量","预计调整后数量","当前权重","目标权重","预计调整后权重"],holdings),("配置依据",["资产部分","选择规则","配权方法"],reasons),("执行约束与待处理事项",["资产部分","代码","事项"],issues),("后续调仓日历",["信号日","拟执行日","事件","资产部分"],calendars)]:
         md += '## '+heading+'\n\n'+(mdtable(headers,rows) if rows else '无相关记录。')+'\n\n'
         if heading == "配置依据":
             md += conditions+'\n\n'+mdtable(audit_headers, audit_rows)+'\n\n'
@@ -215,6 +255,7 @@ def export_rebalance(directory, out):
     write_json(out/"report_data.json", p)
     write_json(out/"checks.json", validate_plan(p))
     write_json(out/"ai_context.json", {"title": title, "strategy_name": name, "template": template,
-                "evidence_file": "report_data.json", "mode": p["mode"], "timing": timing, "position_policy": "long_only"})
+                "evidence_file": "report_data.json", "mode": p["mode"], "timing": timing,
+                "position_policy": "long_only", "transaction_costs": costs})
     write_json(out/"manifest.json", {"template_id": template["id"], "files": {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(out.iterdir()) if f.is_file()}})
     return {"html": str((out/"报告.html").resolve()), "checks": validate_plan(p)}

@@ -85,6 +85,23 @@ def paragraph(text, evidence_ids):
     return {"text": text, "evidence_ids": evidence_ids}
 
 
+def cost_text(config):
+    if config.get("benchmark_only"):
+        return "市场基准按费前价格收益列示"
+    policy = config.get("transaction_costs")
+    if policy is None:
+        legacy = config.get("cost_rate")
+        return "未提供" if legacy is None else f"单边佣金 {legacy:.4%}"
+    fields = {"commission_rate": "佣金", "slippage_rate": "滑点"}
+    labels = {"stock": "A股", "etf": "境内ETF", "us_etf": "海外ETF"}
+    terms = [f"{label} {policy[key]:.4%}" for key, label in fields.items()]
+    terms.append(f"A股卖出印花税 {policy['stamp_duty_rate']:.4%}")
+    terms.extend(f"{item['from']}起 {item['rate']:.4%}" for item in policy["stamp_duty_schedule"])
+    terms.extend(f"{labels[kind]}{fields[key]} {value:.4%}"
+                 for kind, rates in policy["by_kind"].items() for key, value in rates.items())
+    return "，".join(terms)
+
+
 def decorate(data, config):
     """生成共享的章节契约、研究摘要、设定表和披露内容，供HTML/Markdown/AI复用。"""
     template = json.loads(TEMPLATE.read_text(encoding="utf-8"))
@@ -118,7 +135,7 @@ def decorate(data, config):
             allocation = "单一证券买入持有："+c["benchmark_only"].get("name", c["benchmark_only"].get("code", "未提供"))
         data["overview"].append({"strategy": s["label"], "allocation": allocation or "净值输入未提供资产配置",
             "rebalance": rules.get("大类调仓", "未提供"), "macro": rules.get("宏观规则", "未提供"),
-            "cost": "未提供" if c.get("cost_rate") is None else f"{c['cost_rate']:.4%}",
+            "cost": rules["交易成本率"],
             "benchmark": c.get("benchmark", c.get("benchmark_only", {})).get("name", c.get("benchmark", c.get("benchmark_only", {})).get("code", "未提供"))})
         sleeve_names = {x["id"]:x.get("name", x["id"]) for x in c.get("sleeves", [])}
         for row in s["detail"]["trades"]:
@@ -187,22 +204,24 @@ def decorate(data, config):
         {"item":"比较区间", "value":f"{data['period']['start']}至{data['period']['end']}，{data['period']['observations']}个估值日"},
         {"item":"计价币种", "value":data["period"]["currency"]},
         {"item":"持仓方向", "value":"全部资产只做多，目标权重及持仓非负，现金不透支。仅提供净值的输入无法验证实际持仓方向"},
-        {"item":"净值基点", "value":"共同起始日收盘净值指数设为1；延续各自原有持仓路径，首日收益记0"},
-        {"item":"成本口径", "value":"；".join(f"{x['strategy']}：交易成本率{x['cost']}" for x in data["overview"])},
+        {"item":"净值基点", "value":data["period"]["anchor"]},
+        {"item":"成本口径", "value":"。".join(f"{x['strategy']}的费用设置为{x['cost']}" for x in data["overview"])},
         {"item":"统计口径", "value":"年化收益按日历天数/365.25折算；波动率及夏普比率按252日折算；夏普计算无风险利率取0"}]
     notes = list(dict.fromkeys(n for s in data["strategies"] for n in s["detail"]["source_notes"]))
     for n in notes:
         client_text(n, "数据与执行说明")
     data["execution_notes"] = notes
     data["disclosures"] = [{"id":"historical", "title":"历史模拟与前瞻风险", "text":"报告展示给定规则在历史数据上的模拟表现。历史收益、风险和持仓结果不代表未来表现，也不构成收益承诺或当前交易指令。"}]
-    costs = [s["config"].get("cost_rate") for s in data["strategies"]]
-    if all(x == 0 for x in costs):
-        cost_text = "回测交易成本率设为0。实际佣金、税费、冲击成本和交易滑点会影响可实现收益；现金收益及成交简化以本报告回测设定为准。"
-    elif any(x is None for x in costs):
-        cost_text = "部分输入未提供交易成本设定，相关净值的费前或费后口径尚待核实。各策略成本设置见回测设定。"
-    else:
-        cost_text = "各策略按列示的交易成本率计提。该设定不自动覆盖税费、冲击成本、滑点和管理费用；实际交易结果可能与模拟值存在差异。"
-    data["disclosures"].append({"id":"costs", "title":"交易成本与实现条件", "text":cost_text})
+    fee_note = "佣金和滑点按买卖成交额计提，配置的印花税仅计入A股卖出。最低佣金、独立过户费和换汇费用未单列。"
+    if all(item["cost"] == "单边佣金 0.0000%" for item in data["overview"]):
+        fee_note = "原始回测交易成本率为零。实际交易存在费用。"
+    if any(item["cost"] == "未提供" for item in data["overview"]):
+        fee_note += "部分输入未提供费用设置，费前或费后口径待核实。"
+    fee_totals = [f"{item['label']} {item['detail']['transaction_cost']:,.2f} {item['currency']}"
+                  for item in data["strategies"] if "transaction_cost" in item["detail"]]
+    if fee_totals:
+        fee_note += "本比较区间入账费用为" + "，".join(fee_totals) + "。"
+    data["disclosures"].append({"id":"costs", "title":"交易成本与实现条件", "text":fee_note})
     data["disclosures"].append({"id":"model", "title":"样本与模型局限", "text":"本次仅评价所列历史区间。未提供独立样本外检验、滚动前推及参数敏感性检验，现有结果不能据此证明跨周期稳定性。"})
     if any(s["config"].get("macro",{}).get("enabled") for s in data["strategies"]):
         data["disclosures"].append({"id":"macro", "title":"指标解释", "text":"条件规则按照配置指标及阈值触发。VIX等市场指标反映特定市场状态，其触发记录本身不足以确认经济周期阶段。"})

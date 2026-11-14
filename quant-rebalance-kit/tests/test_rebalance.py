@@ -17,7 +17,7 @@ for kit in ["quant-rebalance-kit", "quant-strategy-kit", "quant-report-kit"]:
 from strategykit.config import validate
 from strategykit.data import Dataset
 from strategykit.engine import backtest
-from rebalancekit.inputs import review
+from rebalancekit.inputs import digest, review
 from rebalancekit.planning import make_plan
 from rebalancekit.exports import export_plan
 from rebalancekit.quotes import extract_quotes
@@ -45,6 +45,73 @@ def fixture():
 
 
 class RebalanceRules(unittest.TestCase):
+    def test_fee_confirmation_changes_without_resetting_legacy_account_state(self):
+        c, d, a, r, q = fixture()
+        a["strategy_state"] = {"strategy_digest": digest(c)}
+        a["source"], r["mode"] = "actual", "live"
+        before = review(c, a, r)
+        approval = {**before["confirmation_template"], "confirmed": True, "confirmed_at": r["as_of"],
+                    "user_statement": "已确认原计划。"}
+        c.pop("cost_rate")
+        c["transaction_costs"] = {"commission_rate": .001}
+        after = review(c, a, r)
+        self.assertNotEqual(after["context_digest"], before["context_digest"])
+        with self.assertRaisesRegex(ValueError, "确认记录与当前"):
+            make_plan(c, d, a, r, q, approval)
+        approval.update(context_digest=after["context_digest"], user_statement="确认本次佣金及持仓。")
+        self.assertGreater(make_plan(c, d, a, r, q, approval)["transaction_costs"]["estimated_total_cny"], 0.)
+
+    def test_fees_reduce_net_proceeds_and_affordable_whole_lot(self):
+        c, d, a, r, q = fixture()
+        c["sleeves"][0]["assets"][0]["kind"] = "stock"
+        c["transaction_costs"] = {"commission_rate": .001, "slippage_rate": .002, "stamp_duty_rate": .005}
+        plan = make_plan(c, d, a, r, q)
+        sell, buy = plan["orders"]
+        self.assertEqual((sell["quantity"], buy["quantity"]), (30., 29.))
+        self.assertAlmostEqual(sell["stamp_duty_native"], 1.5)
+        self.assertEqual(buy["stamp_duty_native"], 0.)
+        self.assertAlmostEqual(sell["estimated_cash_change_native"], 297.60)
+        self.assertAlmostEqual(buy["estimated_cash_change_native"], -290.87)
+        self.assertAlmostEqual(plan["account"]["cash_after_cny"], 6.73)
+        self.assertAlmostEqual(plan["account"]["projected_equity_cny"], 996.73)
+        self.assertAlmostEqual(plan["transaction_costs"]["estimated_total_cny"], 3.27)
+        self.assertEqual(validate_plan(plan)["cash_conservation"], "passed")
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            export_plan(plan, validate(c), target / "plan")
+            export_rebalance(target / "plan", target / "report")
+            validate_artifact(target / "report")
+            self.assertIn("预计费用3.27元", (target / "report/报告.html").read_text())
+        plan["orders"][0]["stamp_duty_native"] += 1
+        with self.assertRaisesRegex(ValueError, "费用分项"):
+            validate_plan(plan)
+
+    def test_same_security_transfer_uses_final_net_fee(self):
+        c, d, a, r, q = fixture()
+        c["sleeves"][1]["assets"][0]["code"] = "A"
+        a["positions"][1]["code"] = "A"
+        c["transaction_costs"] = {"commission_rate": .01}
+        plan = make_plan(c, d, a, r, q)
+        self.assertEqual(plan["orders"], [])
+        self.assertEqual(plan["transaction_costs"]["estimated_total_cny"], 0.)
+        self.assertEqual([x["projected_quantity"] for x in plan["holdings"]], [50., 50.])
+        validate_plan(plan)
+
+    def test_foreign_fee_stays_in_trade_currency_and_uses_market_override(self):
+        c, d, a, r, q = fixture()
+        c["sleeves"][1]["assets"][0]["kind"] = "us_etf"
+        c["transaction_costs"] = {"by_kind": {"us_etf": {"commission_rate": .1}}}
+        q["quotes"][1].update(price=2., currency="USD")
+        q["fx"] = [{"currency": "USD", "rate_to_cny": 5., "available_at": r["as_of"]}]
+        a["cash"].append({"sleeve": "cash", "currency": "USD", "amount": 20.})
+        plan = make_plan(c, d, a, r, q)
+        buy = next(order for order in plan["orders"] if order["code"] == "B")
+        self.assertEqual(buy["quantity"], 9.)
+        self.assertAlmostEqual(buy["estimated_cost_native"], 1.8)
+        self.assertAlmostEqual(plan["transaction_costs"]["estimated_total_cny"], 9.)
+        self.assertAlmostEqual(sum(row["amount"] for row in plan["cash_after"] if row["currency"] == "USD"), .2)
+        validate_plan(plan)
+
     def test_risk_parity_plan_reuses_historical_decision_and_discloses_estimate(self):
         c,d,a,r,q=fixture()
         rng=np.random.default_rng(21)

@@ -37,10 +37,12 @@ Windows 使用 `py -3.11 -m venv .venv` 和 `.venv\Scripts\Activate.ps1`。直�
 
 0.5 通过[研究任务操作](multi-asset-investment/references/研究任务操作.md)保存研究条件、对照方案、数据指纹和进度。在同一个研究目录打开新会话，可接着上次研究修改频率、预检原数据并另存比较报告。已有 0.4 的运行记录也可接入。新研究先让 Agent 读取 `multi-asset-investment/SKILL.md`，确认年份、资产、配权和调仓频率。市场数据、账户和报告保存在使用者工作目录。
 
+0.6 在回测和调仓计划中加入[交易成本](quant-strategy-kit/references/交易成本说明.md)。用户未给出费用时，Agent 会给出建议并询问。确认后，回测按成交扣费，调仓计划按净回款及含费用的现金预算估算数量。
+
 ## 开发、适配与发布
 
 四个 kit 和统一入口各保留一份源码；平台差异放在 `adapters/`，安装包分别由 `scripts/build_codex_release.py`、`scripts/build_claude_code_release.py`、`scripts/build_workbuddy_release.py` 和 `scripts/build_dsh_release.py` 生成。当前提供 Codex、Claude Code、WorkBuddy 和 DeepSeek Harness（DSH）适配。
 
-版本号在 `VERSION`。源码、适配说明和构建脚本进入 Git。生成目录与 ZIP 放在本地 `output/`，上传至对应版本的 GitHub Release。维护步骤见[项目维护与发布](docs/项目维护与发布.md)，平台安装方法见上表。`0.5.0` 面向 Codex、WorkBuddy 和 DeepSeek Harness，三份安装包来自同一核心源码。Claude Code 安装包见 `0.3.0` Release。
+版本号在 `VERSION`。源码、适配说明和构建脚本进入 Git。生成目录与 ZIP 放在本地 `output/`，上传至对应版本的 GitHub Release。维护步骤见[项目维护与发布](docs/项目维护与发布.md)，平台安装方法见上表。`0.6.0` 面向 Codex、WorkBuddy 和 DeepSeek Harness，三份安装包来自同一核心源码。Claude Code 安装包见 `0.3.0` Release。
 
 报告使用[投资回测报告规范](quant-report-kit/references/投资回测报告规范.md)；跨模块要求见[AGENTS.md](AGENTS.md)。各模块 references 仅包含投资研究所需说明，客户报告和产品界面采用投资研究表达。

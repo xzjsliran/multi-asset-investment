@@ -9,14 +9,15 @@ import numpy as np
 import pandas as pd
 
 from .config import all_assets, write_json, validate
+from .costs import COST_FIELDS
 from .engine import backtest
 
 
 # 即使本次没有成交、选股或缺口，也保留固定表头供报告读取。
 TABLE_COLUMNS = {
-    "daily": ["date", "nav", "equity", "return", "cash_weight", "drawdown"],
+    "daily": ["date", "nav", "equity", "return", "cash_weight", "drawdown", "transaction_cost", *COST_FIELDS],
     "weights": ["date", "sleeve", "code", "value", "weight"],
-    "trades": ["date", "signal_date", "sleeve", "code", "amount", "side", "cost"],
+    "trades": ["date", "signal_date", "sleeve", "code", "amount", "side", "cost", *COST_FIELDS, "internal_transfer"],
     "selections": ["signal_date", "execution_date", "sleeve", "code", "name", "within_weight"],
     "targets": ["execution_date", "signal_date", "sleeve", "code", "target_value", "portfolio_weight"],
     "blocked": ["date", "sleeve", "code", "side", "reason", "amount"],
@@ -33,7 +34,8 @@ def metrics(daily):
             "annual_return": float(daily["nav"].iloc[-1] ** (1 / years) - 1),
             "annual_volatility": vol, "max_drawdown": float(daily["drawdown"].min()),
             "sharpe_zero_rf": float(r.mean() * 252 / vol) if vol > 1e-12 else None,
-            "final_equity": float(daily["equity"].iloc[-1]), "trading_days": len(daily)}
+            "final_equity": float(daily["equity"].iloc[-1]), "trading_days": len(daily),
+            "transaction_cost": float(daily["transaction_cost"].sum())}
 
 
 def review_execution(config, result, checks, omitted):
@@ -119,6 +121,7 @@ def export_results(config, data, out, compare_equal=True):
             b["return"] = b["nav"].pct_change(fill_method=None).fillna(0)
             b["equity"] = b["nav"] * config["initial_capital"]
             b["drawdown"] = b["nav"] / b["nav"].cummax().clip(lower=1) - 1
+            b["transaction_cost"] = 0.  # 市场基准为费前价格参照，不模拟券商成交。
             add_comparison("benchmark", benchmark + " 持有", b, "benchmark_daily.csv")
         else:
             omitted.append({"scenario": "benchmark", "code": benchmark, "reason": "基准行情未完整覆盖回测日期"})
@@ -151,13 +154,16 @@ def export_results(config, data, out, compare_equal=True):
               "future_signal_trades": int((pd.to_datetime(result["trades"]["signal_date"]) >= pd.to_datetime(result["trades"]["date"])).sum()) if not result["trades"].empty else 0,
               "fallback_equal_count": fallback, "missing_macro_count": missing_macro,
               "risk_allocation_fallback_count": sum(x.get("method") == "risk_parity" and x.get("status") != "success" for x in result["regimes"]),
-              "blocked_attempts": len(result["blocked"]), "long_valuation_gap_rows": len(result["valuation_gaps"]), "transaction_cost": 0,
+              "blocked_attempts": len(result["blocked"]), "long_valuation_gap_rows": len(result["valuation_gaps"]),
+              "transaction_cost": summary["transaction_cost"],
+              "cost_breakdown": {field: float(daily[field].sum()) for field in COST_FIELDS},
               "position_policy": "long_only", "negative_position_rows": int(result["weights"]["weight"].lt(0).sum()),
               "negative_target_rows": int(result["targets"]["target_value"].lt(0).sum()),
               "minimum_cash_weight": float(daily["cash_weight"].min())}
     save_json("checks.json", checks, "资金、时序及数据缺口核对")
     execution = review_execution(config, result, checks, omitted)
-    notes = ["所有资产只做多；目标权重及持仓非负，不使用融资杠杆。", "交易成本和现金收益均为零，允许分数份额。",
+    notes = ["所有资产只做多；目标权重及持仓非负，不使用融资杠杆。",
+             "回测按成交额计佣金及滑点，A股卖出按已确认费率计印花税。建仓时扣费，现金收益为零，允许分数份额。",
              "信号日收盘形成规则，下一中国交易日收盘记账；当日收益先归旧持仓，再调仓。",
              "复权单位用于收益记账；未完整模拟涨跌停和整手成交。",
              "境内QDII使用其自身人民币场内价格，包含市场折溢价的变化；不重复乘汇率。"]
@@ -178,6 +184,7 @@ def export_results(config, data, out, compare_equal=True):
         "start": summary["start"], "end": summary["end"],
         "units": {"money": "CNY", "return_weight_volatility_drawdown": "decimal", "nav": "initial_1"},
         "conventions": {"position_policy": "long_only", "execution": "signal_close_then_next_CN_session_close", "daily_weights": "after_rebalance",
+                        "opening_return": "from_initial_capital",
                         "trade_amount": "buy_positive_sell_negative", "annualization_days": 252,
                         "cagr_years": "calendar_days_between_first_and_last_row_divided_by_365.25", "risk_free_rate": 0,
                         "missing_json": "null", "missing_csv": "empty_cell", "csv_encoding": "utf-8-sig"},

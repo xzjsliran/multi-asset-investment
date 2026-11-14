@@ -52,9 +52,14 @@ def main():
         from strategykit.prepare import prepare
         print(prepare(read_config(a.config), a.data_kit, a.work, a.provider, a.research, a.macro_data, a.cache))
     else:
+        from strategykit.costs import cost_confirmation_needed, cost_question
         from strategykit.data import Dataset
         from strategykit.results import export_results
-        summary, checks = export_results(read_config(a.config), Dataset.load(a.data), a.out, not a.no_equal_comparison)
+        config = read_config(a.config)
+        if cost_confirmation_needed(config):
+            print(json.dumps(cost_question(), ensure_ascii=False, indent=2))
+            return
+        summary, checks = export_results(config, Dataset.load(a.data), a.out, not a.no_equal_comparison)
         print(json.dumps({"summary": summary, "checks": checks, "results": str(Path(a.out).resolve()),
                           "handoff": str(Path(a.out).resolve() / "handoff.json")}, ensure_ascii=False, indent=2))
 
