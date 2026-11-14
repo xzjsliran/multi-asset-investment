@@ -9,6 +9,7 @@ from .inputs import records
 from .evidence import METRICS, add_value
 from .reporting import cost_text, public_runs, decorate
 from .long_only import check_long_only
+from .review import daily_exposure, drawdown_trace, suggestions
 
 
 def selection_text(c):
@@ -136,7 +137,7 @@ def bounded(frame, start, end, date_col="date"):
     return d.loc[dates.between(start, end)].copy()
 
 
-def detail(run, selected, metrics, start, end, opening_capital):
+def detail(run, selected, curve, metrics, start, end, opening_capital):
     from .risk import analyse_risk
     names = {s["id"]: s.get("name", s["id"]) for s in run.config.get("sleeves", [])}
     names["cash"] = "未分配现金"
@@ -161,6 +162,9 @@ def detail(run, selected, metrics, start, end, opening_capital):
         if not np.isclose(error, 0, atol=1e-8):
             raise ValueError(f"{run.label}的分部分盈亏无法还原所选区间收益。")
         out["contributions"].sort(key=lambda x: x["contribution"], reverse=True)
+        trace = drawdown_trace(selected, curve, metrics, names, opening_capital)
+        if trace:
+            out["drawdown_trace"] = trace
     weights = bounded(run.tables.get("weights"), start, end)
     if not weights.empty:
         if weights.duplicated(["date", "sleeve", "code"]).any():
@@ -177,6 +181,7 @@ def detail(run, selected, metrics, start, end, opening_capital):
             expected = pd.to_datetime(weights["date"]).map(account) * weights["weight"]
             if not np.allclose(weights["value"], expected, rtol=1e-7, atol=.01):
                 raise ValueError(f"{run.label}的持仓金额、权重和账户权益不一致。")
+        weights["date"] = pd.to_datetime(weights["date"])
         history = weights.groupby(["date", "sleeve"], as_index=False)["weight"].sum()
         history["name"] = history["sleeve"].map(names).fillna(history["sleeve"])
         out["weight_history"] = records(history)
@@ -189,6 +194,9 @@ def detail(run, selected, metrics, start, end, opening_capital):
         last["name"] = last["code"].map(ticker_names).fillna(last["code"])
         last["sleeve_name"] = last["sleeve"].map(names).fillna(last["sleeve"])
         out["holdings"] = records(last.sort_values("weight", ascending=False))
+    out["exposure"] = daily_exposure(run, selected, weights)
+    out["blocked_in_period"] = len(bounded(run.tables.get("blocked"), start, end))
+    out["valuation_gaps_in_period"] = len(bounded(run.tables.get("valuation_gaps"), start, end))
     for key, date_col in [("trades", "date"), ("selections", "execution_date")]:
         out[key] = records(bounded(run.tables.get(key), start, end, date_col))
     for key in ["regimes", "optimization"]:
@@ -244,7 +252,8 @@ def execution_review(run, regimes, start):
         for row in fallback
     })
     text += "回退原因包括" + "、".join(reasons) + "。"
-    return {"status": status, "text": text, "events": len(regimes), "fallback": len(fallback)}
+    return {"status": status, "text": text, "events": len(regimes), "fallback": len(fallback),
+            "fallback_dates": [row["execution_date"] for row in fallback]}
 
 
 def analyse(config, runs):
@@ -289,7 +298,7 @@ def analyse(config, runs):
         d, m = performance(selected, opening)
         _, original = performance(run.daily, run.uses_opening_capital)
         opening_capital = run.initial_capital if opening else None
-        details = detail(run, selected, m, start, end, opening_capital)
+        details = detail(run, selected, d, m, start, end, opening_capital)
         review = execution_review(run, details["regimes"], start)
         label = run.label
         if review and review["status"] == "method_not_evaluated":
@@ -386,7 +395,9 @@ def analyse(config, runs):
     if len({cost_text(r.config) for r in runs}) > 1:
         data["scope_notes"].append("这些策略采用不同或未注明的交易成本设置，差异已保留在规则表中。")
     data["scope_notes"].append("收益最高、回撤最浅分别描述本次历史结果；策略设置不同的比较同时包含资产、比例和规则变化。")
-    return decorate(data, config)
+    decorate(data, config)
+    data["review_suggestions"] = suggestions(data, fact)
+    return data
 
 
 def SCENARIO_FILE(run):

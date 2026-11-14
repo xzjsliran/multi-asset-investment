@@ -71,6 +71,39 @@ class ResearchContinuity(unittest.TestCase):
         repeated = self.cli("research", "continue", "--changes", "confirmed.json")
         self.assertEqual(repeated["report"], done["report"])
 
+    def test_review_uses_actual_exposures_and_reuses_the_original_drawdown_path(self):
+        self.task()
+        self.cli("research", "track", "--task", "task-old", "--data", "normal")
+        completed = self.cli("research", "continue")
+        self.assertEqual(completed, self.cli("research", "resume"))
+        report = self.path / completed["report"]
+        data = read_json(report / "report_data.json")
+        reviews = completed["review_suggestions"]
+        self.assertEqual([item["kind"] for item in reviews], ["exposure", "drawdown"])
+        context = read_json(report / "ai_context.json")
+        self.assertEqual(context["review_suggestions"], reviews)
+        facts = {item["id"] for item in context["facts"]}
+        self.assertTrue(all(set(item["evidence_ids"]) <= facts for item in reviews))
+        self.assertLess(data["strategies"][0]["detail"]["exposure"]["equity"],
+                        data["strategies"][1]["detail"]["exposure"]["equity"])
+        worst = next(item for item in data["strategies"] if item["id"] == reviews[1]["strategies"][0])
+        trace = worst["detail"]["drawdown_trace"]
+        self.assertAlmostEqual(sum(row["contribution"] for row in trace["parts"]),
+                               worst["metrics"]["max_drawdown"])
+        self.assertIn("## 结果复查", (report / "报告解读.md").read_text(encoding="utf-8"))
+        self.cli("report", "check", "--report-dir", report)
+        before = hashes(report.parent)
+        config = read_json(report / "report_config.json")
+        write_json(self.path / "review-window.json", {**config, "start": trace["peak"], "end": trace["trough"]})
+        narrower = self.cli("report", "build", "--config", "review-window.json", "--out", "drawdown-review")
+        self.cli("report", "check", "--report-dir", self.path / "drawdown-review")
+        revised = read_json(self.path / "drawdown-review/report_data.json")
+        self.assertEqual(revised["period"]["start"], trace["peak"])
+        self.assertEqual(revised["period"]["end"], trace["trough"])
+        self.assertEqual(revised["input_fingerprints"], data["input_fingerprints"])
+        self.assertEqual(hashes(report.parent), before)
+        self.assertEqual(Path(narrower["report"]).parent, self.path / "drawdown-review")
+
     def test_fresh_session_continues_one_run_with_two_selected_scenarios(self):
         self.task()
         old = self.old_run()

@@ -216,6 +216,8 @@ def backtest(config, data):
         histories.append({"date": day, "nav": nav / capital, "equity": nav,
                           "return": nav / previous_nav - 1, "cash_weight": sum(books[sid]["cash"] for sid in ids) / nav,
                           "transaction_cost": cost, **day_costs,
+                          # 轻量的日线记录也提供各部分的非现金仓位，供配套对照使用。
+                          **{f"invested_weight_{sid}": (post[sid] - books[sid]["cash"]) / nav for sid in sleeves},
                           **{f"pnl_{sid}": pnl[sid] for sid in ids}})
         for sid in ids:
             for code, amount in {**values(sid, px), "CASH": books[sid]["cash"]}.items():

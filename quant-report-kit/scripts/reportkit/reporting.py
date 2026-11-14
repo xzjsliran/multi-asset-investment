@@ -242,11 +242,12 @@ def validate_report(data):
         client_text(s["label"], "策略名称", heading=True)
         for row in s["detail"]["rules"]:
             client_text(row["parameter"]+row["value"], "策略规则")
+    facts = {row["id"]: row for row in data["facts"]}
     for row in data["facts"]:
         client_text(row["text"], "研究事实")
     for b in data.get("commentary", []):
         client_text(b["text"], "研究解读")
-        if not b.get("evidence_ids") or not set(b["evidence_ids"]) <= {f["id"] for f in data["facts"]}:
+        if not b.get("evidence_ids") or not set(b["evidence_ids"]) <= facts.keys():
             raise ValueError("研究解读引用了不存在的事实编号。")
         if "evidence_values" in data:
             if contains_number(b["title"]):
@@ -254,6 +255,16 @@ def validate_report(data):
             expected = render_commentary(data, b.get("interpretation"), b.get("claims", []), b["evidence_ids"])
             if b["text"] != expected:
                 raise ValueError("研究解读中的数字与本次计算证据不一致。")
+    reviews = data.get("review_suggestions", [])
+    if not isinstance(reviews, list) or len(reviews) > 2:
+        raise ValueError("结果复查最多列两项。")
+    for item in reviews:
+        client_text(item["title"], "复查标题", heading=True)
+        for key in ("observation", "test", "decision"):
+            client_text(item[key], "结果复查")
+        ids = item.get("evidence_ids")
+        if not ids or any(fid not in facts or not set(item["strategies"]) <= set(facts[fid]["strategies"]) for fid in ids):
+            raise ValueError("复查建议须引用本次计算中相应方案的事实。")
     if data.get("execution_findings") and data["summary"][:len(data["execution_findings"])] != data["execution_findings"]:
         raise ValueError("研究摘要缺少实际执行的限制说明。")
     required = {"historical", "costs", "model", "holdings", "long_only"}

@@ -105,6 +105,11 @@ def make_snapshot(data):
     public = json.loads(compact(data))
     for s in public["strategies"]:
         s["source"].pop("directory", None)
+    review = review_markdown(data)
+    if review:
+        # 离线模板已有带证据的研究局限区，直接复用其正文渲染。
+        public["disclosures"].append({"id": "review_suggestions", "title": "结果复查", "text": review})
+        queries["disclosures"]["rows"] = public["disclosures"]
     return {"surface": "report", "title": data["title"], "status": "reviewed", "buildStatus": "complete",
             "id": "quant-report-" + hashlib.sha256(compact(data).encode()).hexdigest()[:20],
             "generatedAt": datetime.now(timezone.utc).isoformat(), "report": {"asOf": data["period"]["end"]},
@@ -137,6 +142,14 @@ def pct(v):
 
 def md_cell(value):
     return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def review_markdown(data):
+    blocks = []
+    for item in data.get("review_suggestions", []):
+        ids = "、".join(item["evidence_ids"])
+        blocks.extend([f"**{item['title']}**", f"{item['observation']}（{ids}）", item["test"], item["decision"]])
+    return "\n\n".join(blocks)
 
 
 def markdown_report(data):
@@ -207,6 +220,9 @@ def markdown_report(data):
     for item in data["disclosures"]:
         out += ["### "+item["title"], "", item["text"], ""]
     out += [n+"\n" for n in data["scope_notes"]]
+    review = review_markdown(data)
+    if review:
+        out += ["## 结果复查", "", review, ""]
     heading("appendix")
     table([{"strategy":s["label"],**s["original_metrics"]} for s in data["strategies"]], [("strategy","策略",None),("start","起始日",None),("end","结束日",None),*cols[1:]])
     out += [data["period"]["anchor"] + "。累计收益为期末与期初净值之比减1。年化收益按实际日历天数折算，年化波动率采用日收益样本标准差乘以√252。夏普比率采用零无风险利率。", "",
@@ -234,6 +250,7 @@ def export_report(data, config, out, template):
         "execution_review": s["execution_review"]} for s in data["strategies"]]
     context["evidence_values"] = data["evidence_values"]
     context["execution_findings"] = data["execution_findings"]
+    context["review_suggestions"] = data.get("review_suggestions", [])
     context["writing_instructions"] = (
         "按本次事实撰写解读。每段提供 section、title、text、evidence_ids，可选 claims。"
         "正文 text 只写定性解释，数值以 evidence_values 的键写入 claims，由程序生成完整陈述。"
@@ -266,4 +283,5 @@ def export_report(data, config, out, template):
                 "inputs": data["input_fingerprints"], "template_sha256": hashlib.sha256(Path(template).read_bytes()).hexdigest(),
                 "files": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(out.iterdir()) if p.is_file()}}
     write_json(out/"manifest.json", manifest)
-    return {"report": str(out/"报告.html"), "interpretation": str(out/"报告解读.md"), "checks": checks}
+    return {"report": str(out/"报告.html"), "interpretation": str(out/"报告解读.md"),
+            "checks": checks, "review_suggestions": context["review_suggestions"]}

@@ -183,6 +183,8 @@ class ResearchWorkflow(unittest.TestCase):
         data = read_json(Path(report["report"]).parent / "report_data.json")
         self.assertIn("无法评价该方法", data["summary"][0]["text"])
         self.assertEqual(data["pairs"][0]["comparison_type"], "回退配置比较")
+        self.assertEqual([review["kind"] for review in data["review_suggestions"]], ["execution"])
+        self.assertEqual(data["review_suggestions"][0]["evidence_ids"], data["execution_findings"][0]["evidence_ids"])
         claim = data["evidence_values"]["metric.strategy.max_drawdown"]
         draft = write_json(self.path / "fallback-commentary.json", {"sections": [{
             "section": "summary", "title": "回退配置的回撤表现",

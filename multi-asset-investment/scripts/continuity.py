@@ -228,8 +228,13 @@ def status(workspace, study):
     next_action = issue["next_action"] if issue else (
         "review_report" if version["stage"] == "report_saved" else "continue_research"
     )
-    return {"workspace": str(workspace), "task_file": str(workspace / TASK_FILE),
-            **version, "next_action": next_action, "conditions": conditions, "history": history}
+    result = {"workspace": str(workspace), "task_file": str(workspace / TASK_FILE),
+              **version, "next_action": next_action, "conditions": conditions, "history": history}
+    if version["stage"] == "report_saved" and version["report"]:
+        context = workspace / version["report"] / "ai_context.json"
+        if context.is_file():
+            result["review_suggestions"] = read_json(context).get("review_suggestions", [])
+    return result
 
 
 def pending(workspace, study, issue):

@@ -28,10 +28,20 @@ def check_long_only(run):
                 v = pd.to_numeric(frame[col], errors="coerce")
                 if not np.isfinite(v).all() or v.lt(0).any():
                     raise ValueError(f"{table}.{col}出现无效值或负持仓，违反只做多约束。")
+    cash = None
     if "cash_weight" in run.daily:
-        v = pd.to_numeric(run.daily["cash_weight"], errors="coerce")
-        if not np.isfinite(v).all() or v.lt(-1e-10).any() or v.gt(1+1e-9).any():
+        cash = pd.to_numeric(run.daily["cash_weight"], errors="coerce")
+        if not np.isfinite(cash).all() or cash.lt(-1e-10).any() or cash.gt(1+1e-9).any():
             raise ValueError("每日现金权重违反只做多和现金不透支要求。")
+    exposure_cols = [col for col in run.daily if col.startswith("invested_weight_")]
+    if exposure_cols:
+        exposures = run.daily[exposure_cols].apply(pd.to_numeric, errors="coerce")
+        if not np.isfinite(exposures.to_numpy()).all() or exposures.lt(-1e-10).any().any() or exposures.sum(axis=1).gt(1+1e-9).any():
+            raise ValueError("每日非现金仓位违反只做多和权重约束。")
+        expected = {f"invested_weight_{sleeve['id']}" for sleeve in c.get("sleeves", [])}
+        if set(exposure_cols) == expected and cash is not None:
+            if not np.allclose(exposures.sum(axis=1) + cash, 1., atol=1e-8, rtol=0):
+                raise ValueError("每日非现金仓位与现金权重合计不为1。")
     has_holdings = not run.tables.get("weights", pd.DataFrame()).empty
     return {"policy": "long_only", "holdings_verified": has_holdings,
             "assessment": "配置与已提供持仓通过只做多检查" if has_holdings else "配置按只做多要求检查；未提供持仓明细，无法验证实际持仓方向"}
