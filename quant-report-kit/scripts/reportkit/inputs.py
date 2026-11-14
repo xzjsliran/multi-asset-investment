@@ -24,6 +24,27 @@ def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False, default=str), encoding="utf-8")
 
 
+def single_request(path, name=None, title=None, main_only=False):
+    """共享单次回测的配套对照选择，供报告和研究续做使用。"""
+    from .reporting import default_name, INTERNAL
+
+    handoff = read_json(path / "handoff.json")
+    available = {item["id"] for item in handoff["scenarios"]}
+    selected = ["strategy"] if main_only else [scenario for scenario in SCENARIOS if scenario in available]
+    if not name:
+        name = handoff["strategy_name"]
+        if INTERNAL.search(name):
+            name = default_name(read_json(path / "strategy.json"))
+    labels = {"strategy": name, "equal_weight": "组合内等权对照", "static": "固定权重对照", "benchmark": "市场基准"}
+    return {
+        "schema_version": 1, "title": title or name + "回测报告", "alignment": "common",
+        "strategies": [
+            {"id": scenario, "label": labels[scenario], "result_dir": str(path), "scenario": scenario}
+            for scenario in selected
+        ],
+    }
+
+
 def records(frame):
     # pandas统一处理时间戳、空值与numpy数值；JSON不输出NaN/Infinity。
     return json.loads(frame.to_json(orient="records", date_format="iso", force_ascii=False, double_precision=15))
@@ -155,13 +176,17 @@ def load_run(spec, base):
 def load_request(file):
     p = Path(file).resolve()
     c = read_json(p)
+    return c, load_comparison(c, p.parent)
+
+
+def load_comparison(c, base):
     if c.get("schema_version") != 1 or not isinstance(c.get("strategies"), list) or not c["strategies"]:
         raise ValueError("比较配置需要schema_version=1和非空strategies数组。")
-    runs = [load_run(s, p.parent) for s in c["strategies"]]
+    runs = [load_run(s, base) for s in c["strategies"]]
     if len({s.id for s in runs}) != len(runs) or len({s.label for s in runs}) != len(runs):
         raise ValueError("策略id和显示名称都应唯一。")
     if len({s.currency for s in runs}) != 1:
         raise ValueError("各策略基础币种不同，请先在数据/回测模块换算成同一币种。")
     if c.get("alignment", "common") != "common":
         raise ValueError("当前采用共同日期比较，alignment请使用common。")
-    return c, runs
+    return runs

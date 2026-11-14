@@ -8,11 +8,11 @@ import sys
 
 import pandas as pd
 
-from reportkit.inputs import SCENARIOS, load_request, load_run, read_json, validate_daily, write_json
+from reportkit.inputs import SCENARIOS, load_request, load_run, read_json, single_request, validate_daily, write_json
 from reportkit.analysis import analyse
 from reportkit.evidence import METRICS
 from reportkit.exports import add_commentary, export_report
-from reportkit.reporting import default_name, INTERNAL, validate_artifact
+from reportkit.reporting import validate_artifact
 
 KIT = Path(__file__).resolve().parents[1]
 
@@ -29,15 +29,7 @@ def safe_output(out, inputs=()):
 
 def single_config(args):
     path = Path(args.result).resolve()
-    h = read_json(path/"handoff.json")
-    labels = {s["id"]: s["label"] for s in h["scenarios"]}
-    selected = ["strategy"] if args.main_only else [s for s in SCENARIOS if s in labels]
-    name = args.name or h["strategy_name"]
-    if not args.name and INTERNAL.search(name):
-        name = default_name(read_json(path/"strategy.json"))
-    scenario_names = {"equal_weight":"组合内等权对照", "static":"固定权重对照", "benchmark":"市场基准"}
-    c = {"schema_version": 1, "title": args.title or name+"回测报告", "alignment": "common",
-         "strategies": [{"id": s, "label": name if s=="strategy" else scenario_names[s], "result_dir": str(path), "scenario": s} for s in selected]}
+    c = single_request(path, args.name, args.title, args.main_only)
     if args.metadata:
         c["report"] = read_json(args.metadata)
     if args.start: c["start"]=args.start

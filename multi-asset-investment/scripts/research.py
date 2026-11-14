@@ -20,7 +20,8 @@ def timestamp():
 
 
 def file_sha256(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    with Path(path).open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def write_new(path, value):
@@ -40,6 +41,11 @@ METRICS = {
     "sharpe_zero_rf": "夏普比率（无风险利率为零）",
 }
 REQUIRED_FIELDS = ("objective", "metrics", "comparison")
+DATA_FILES = (
+    "calendar.csv", "prices.csv", "stock_features.csv", "macro_observations.csv",
+    "strategy_data_manifest.json", "quality.json",
+)
+COMPLETED_RUNS = {"completed", "completed_with_notes"}
 
 
 def validate_request(request):
@@ -115,7 +121,7 @@ def load_task(path):
     return task
 
 
-def revise_task(parent, path, patch, root):
+def revise_task(parent, path, patch, root, allow_unchanged=False):
     """支持常见追问，尤其是只改一个调仓设置的受控对照。"""
     from strategykit.config import validate
 
@@ -168,13 +174,20 @@ def revise_task(parent, path, patch, root):
         for key in ("start", "end", "allocation_rebalance") if before[key] != config[key]
     }
     config_changes.update(sleeve_changes)
-    if not config_changes and request == old_task["request"]:
-        raise ValueError("修订未改变研究任务。")
+    if not config_changes:
+        if allow_unchanged and (not request_changes or request == old_task["request"]):
+            return None
+        if request == old_task["request"]:
+            raise ValueError("修订未改变研究任务。")
     change = {"strategy_fields": config_changes, "request_fields": sorted(request_changes)}
     return save_task(path, config, request, root, parent, change)
 
 
-def check_task(task_path, data_path, out=None):
+def input_fingerprints(data_path):
+    return {name: file_sha256(data_path / name) for name in DATA_FILES if (data_path / name).is_file()}
+
+
+def check_task(task_path, data_path, out=None, expected_data=None, require_benchmark=False):
     """预检和回测使用同一份已加载数据，避免重复读文件。"""
     from strategykit.config import read_config
     from strategykit.coverage import preview
@@ -185,13 +198,17 @@ def check_task(task_path, data_path, out=None):
         return {"status": "needs_input", "missing": task["missing"], "next_action": "clarify_research_request"}
     config = read_config(task_path / "strategy.json")
     task_digest = file_sha256(task_path / "task.json")
-    input_files = [
-        data_path / name for name in (
-            "calendar.csv", "prices.csv", "stock_features.csv", "macro_observations.csv",
-            "strategy_data_manifest.json", "quality.json",
+    fingerprints = input_fingerprints(data_path) if out or expected_data is not None else {}
+    if expected_data is not None and fingerprints != expected_data:
+        changed = sorted(
+            name for name in expected_data.keys() | fingerprints.keys()
+            if expected_data.get(name) != fingerprints.get(name)
         )
-    ]
-    fingerprints = {path.name: file_sha256(path) for path in input_files if path.is_file()} if out else {}
+        return {
+            "status": "needs_input", "next_action": "restore_or_confirm_data",
+            "message": "原数据版本已改变或文件缺失。请恢复原数据，或明确指定新的标准数据目录。",
+            "changed_files": changed,
+        }
     try:
         data = Dataset.load(data_path)
     except FileNotFoundError as exc:
@@ -201,9 +218,15 @@ def check_task(task_path, data_path, out=None):
             "message": f"标准数据缺少 {Path(exc.filename).name}，请补齐或运行现有数据准备命令。",
         }
     coverage = preview(config, data)
+    if require_benchmark and any(item["code"] == "benchmark_coverage" for item in coverage["warnings"]):
+        coverage.update(status="needs_input", next_action="supply_data")
+        coverage["blockers"].append({
+            "code": "selected_benchmark_coverage",
+            "message": "本次比较包含原定市场基准，需补齐其行情。",
+        })
     if out is None or coverage["status"] == "needs_input":
         return coverage
-    if fingerprints != {path.name: file_sha256(path) for path in input_files if path.is_file()}:
+    if fingerprints != input_fingerprints(data_path):
         raise ValueError("加载期间数据发生变化，请用已保存的完整数据快照重试。")
     trace = {
         "task": str(task_path / "task.json"),
@@ -257,7 +280,15 @@ def run_task(out, config, data, coverage, request, trace):
     return result
 
 
+def check_run_output(out, task, data, root):
+    check_work_dir(out, root)
+    if any(out == path or out in path.parents or path in out.parents for path in (task, data)):
+        raise ValueError("请为回测指定独立的输出目录。")
+
+
 def main(argv, root):
+    from continuity import add_commands, handle_command
+
     parser = argparse.ArgumentParser(prog="run.py research", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("init", help="保存研究需求及其策略配置")
@@ -275,6 +306,7 @@ def main(argv, root):
         command.add_argument("--data", required=True)
     for command in (create, revise, run):
         command.add_argument("--out", required=True)
+    add_commands(commands)
     args = parser.parse_args(argv)
     sys.path.insert(0, str(root / "quant-strategy-kit/scripts"))
     from strategykit.config import read_config
@@ -289,14 +321,13 @@ def main(argv, root):
         result["task_dir"] = str(out)
     elif args.command == "show":
         result = load_task(Path(args.task).resolve())
-    else:
+    elif args.command in {"preview", "run"}:
         task, data = Path(args.task).resolve(), Path(args.data).resolve()
         out = Path(args.out).resolve() if args.command == "run" else None
         if out is not None:
-            check_work_dir(out, root)
-            inputs = (task, data)
-            if any(out == path or out in path.parents or path in out.parents for path in inputs):
-                raise ValueError("请为回测指定独立的输出目录。")
+            check_run_output(out, task, data, root)
         result = check_task(task, data, out)
+    else:
+        result = handle_command(args, root)
     print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
-    return 2 if result["status"] == "backtest_failed" else 0
+    return 2 if result["status"] in {"backtest_failed", "failed"} else 0
