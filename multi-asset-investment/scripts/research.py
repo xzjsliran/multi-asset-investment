@@ -132,13 +132,14 @@ def load_task(path):
 def revise_task(parent, path, patch, root, allow_unchanged=False):
     """支持常见追问，尤其是只改一个调仓设置的受控对照。"""
     from strategykit.config import validate
+    from strategykit.equity_selection import DEFAULT_POOL, METHOD
 
     old_task = load_task(parent)
     if not isinstance(patch, dict) or not patch:
         raise ValueError("修订须为非空 JSON 对象。")
     fields = ("start", "end", "allocation_rebalance", "transaction_costs")
-    if set(patch) - {*fields, "request", "sleeve_rebalance"}:
-        raise ValueError("修订支持研究需求、起止日、大类或内部调仓频率及交易费用。")
+    if set(patch) - {*fields, "request", "sleeve_rebalance", "sleeve_universe"}:
+        raise ValueError("修订支持研究需求、起止日、股票池、调仓频率及交易费用。")
     request_changes = patch.get("request", {})
     if not isinstance(request_changes, dict):
         raise ValueError("request 修订须为 JSON 对象。")
@@ -167,12 +168,24 @@ def revise_task(parent, path, patch, root, allow_unchanged=False):
         raise ValueError("sleeve_rebalance 须以资产部分 id 为键。")
     if set(changes) - {sleeve["id"] for sleeve in config["sleeves"]}:
         raise ValueError("修订中有未知资产部分。")
+    pools = patch.get("sleeve_universe", {})
+    factor_sleeves = {sleeve["id"] for sleeve in config["sleeves"] if sleeve["selection"]["method"] == METHOD}
+    if not isinstance(pools, dict) or set(pools) - factor_sleeves:
+        raise ValueError("sleeve_universe 须以多因子股票部分的 id 为键。")
     sleeve_changes = {}
     for sleeve in config["sleeves"]:
-        if sleeve["id"] in changes and sleeve["rebalance"] != changes[sleeve["id"]]:
-            key = f"sleeves.{sleeve['id']}.rebalance"
-            sleeve_changes[key] = {"from": sleeve["rebalance"], "to": changes[sleeve["id"]]}
-            sleeve["rebalance"] = changes[sleeve["id"]]
+        sid = sleeve["id"]
+        if sid in changes and sleeve["rebalance"] != changes[sid]:
+            key = f"sleeves.{sid}.rebalance"
+            sleeve_changes[key] = {"from": sleeve["rebalance"], "to": changes[sid]}
+            sleeve["rebalance"] = changes[sid]
+            request["defaults"].pop(key, None)
+            specified.append(key)
+        old_pool = sleeve["selection"].get("universe", DEFAULT_POOL)
+        if sid in pools and old_pool != pools[sid]:
+            key = f"sleeves.{sid}.selection.universe"
+            sleeve_changes[key] = {"from": old_pool, "to": pools[sid]}
+            sleeve["selection"]["universe"] = pools[sid]
             request["defaults"].pop(key, None)
             specified.append(key)
     for key in REQUIRED_FIELDS:

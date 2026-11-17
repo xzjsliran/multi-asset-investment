@@ -2,16 +2,42 @@
 import copy
 
 
+PRESET_NAMES = (
+    "cross-border-allocation", "qdii-equity-allocation", "domestic-allocation",
+    "vix-dynamic-allocation", "risk-parity-allocation", "csi800-factor-monthly",
+)
+
+
 def asset(code, name, kind="etf", **extra):
     return {"code": code, "name": name, "kind": kind, **extra}
 
 
 def fixed(sid, name, weight, assets):
-    return {"id": sid, "name": name, "weight": weight, "rebalance": "quarterly", "assets": assets,
+    return {"id": sid, "name": name, "weight": weight, "rebalance": "monthly", "assets": assets,
             "selection": {"method": "fixed"}, "weighting": {"method": "equal"}}
 
 
+def csi800_stocks(weight):
+    """内置主动股仓采用已验证的月度小市值多因子。"""
+    return {
+        "id": "stocks", "name": "主动A股", "weight": weight, "rebalance": "monthly", "assets": [],
+        "selection": {"method": "quality_value_dividend", "universe": "csi800", "top_n": 20,
+                      "buffer_rank": 40, "max_per_industry": 2, "small_cap_weight": .10},
+        "weighting": {"method": "inverse_volatility", "max_weight": .08},
+    }
+
+
 def preset(name):
+    if name == "csi800-factor-monthly":
+        return {
+            "schema_version": 1, "name": "中证800质量价值红利低波（月度）",
+            "start": "2021-11-01", "end": "2026-10-30", "base_currency": "CNY", "initial_capital": 1_000_000,
+            "position_policy": "long_only", "execution_price": "open", "allocation_rebalance": "monthly",
+            "long_gap_policy": "carry_and_flag",
+            "benchmark": asset("H00300.CSI", "沪深300全收益指数", "index"),
+            "transaction_costs": {"commission_rate": .00025, "slippage_rate": .00025, "stamp_duty_rate": .001},
+            "sleeves": [csi800_stocks(1.)],
+        }
     if name == "risk-parity-allocation":
         c = preset("domestic-allocation")
         c["name"] = "多资产风险平价策略"
@@ -24,23 +50,19 @@ def preset(name):
         return c
     c = {"schema_version": 1, "name": "多资产配置策略（海外ETF权益）", "start": "2025-01-01", "end": "2025-12-31",
          "base_currency": "CNY", "initial_capital": 1_000_000, "position_policy": "long_only",
-         "allocation_rebalance": "quarterly", "max_valuation_gap": 10,
+         "allocation_rebalance": "monthly", "max_valuation_gap": 10,
          "benchmark": asset("510300.SH", "沪深300ETF"), "macro": {"enabled": False}}
     if name in {"cross-border-allocation", "qdii-equity-allocation"}:
         c["long_gap_policy"] = "carry_and_flag"
         c["sleeves"] = [
-            fixed("bond", "美元短债", .50, [asset("SHY", "1—3年美国国债ETF", "us_etf")]),
+            fixed("bond", "美元短债", .25, [asset("SHY", "1—3年美国国债ETF", "us_etf")]),
+            fixed("bond_cny", "人民币长债", .25, [asset("511260.SH", "上证10年期国债ETF")]),
             fixed("gold", "黄金", .10, [asset("518880.SH", "黄金ETF")]),
             fixed("equity", "A股宽基", .10, [asset("510300.SH", "沪深300ETF")]),
             # 海外20%平均分给标普500宽基和纳斯达克100成长仓位。
             fixed("overseas_broad", "海外股票宽基（标普500）", .10, [asset("SPY", "标普500ETF", "us_etf")]),
             fixed("overseas_growth", "海外股票成长（纳斯达克100）", .10, [asset("QQQ", "纳斯达克100ETF", "us_etf")]),
-            {"id": "stocks", "name": "主动A股", "weight": .10, "rebalance": "quarterly", "assets": [],
-             "selection": {"method": "quality_value", "universe": "all_a", "top_n": 5,
-                           "leaders_per_industry": 5, "max_per_industry": 1, "min_roe": 8, "max_pe_ttm": 60, "max_pe": 80,
-                           "max_debt": 80, "positive_two_years": True, "min_listing_days": 365, "snapshot_max_age_days": 7,
-                           "score_weights": {"quality": .5, "value": .35, "size": .15}, "fill_shortfall": "cash"},
-             "weighting": {"method": "min_variance", "lookback": 126, "min_observations": 60, "max_weight": .4, "shrinkage": .1}}
+            csi800_stocks(.10),
         ]
         if name == "qdii-equity-allocation":
             c["name"] = "多资产配置策略（QDII权益）"
@@ -58,16 +80,13 @@ def preset(name):
                         fixed("equity", "股票宽基", .25, [asset("510300.SH", "沪深300ETF")]),
                         fixed("gold", "黄金", .15, [asset("518880.SH", "黄金ETF")]),
                         fixed("commodity", "商品", .1, [asset("159980.SZ", "有色ETF"), asset("159981.SZ", "能源化工ETF"), asset("159985.SZ", "豆粕ETF")]),
-                        {"id": "stocks", "name": "A股动量组合", "weight": .1, "rebalance": "monthly",
-                         "assets": [asset("600519.SH", "贵州茅台", "stock"), asset("000001.SZ", "平安银行", "stock")],
-                         "selection": {"method": "momentum", "lookback": 60, "top_n": 2, "min_return": 0., "fill_shortfall": "cash"},
-                         "weighting": {"method": "min_variance", "lookback": 60, "min_observations": 40, "max_weight": 1., "shrinkage": .1}}]
+                        csi800_stocks(.10)]
         if name == "vix-dynamic-allocation":
             c["macro"] = {"enabled": True, "rebalance": "monthly", "missing": "base_weights", "rules": [
                 {"name": "波动偏高", "all": [{"series": "vix", "op": ">=", "threshold": 20, "max_age_days": 10}],
                  "weights": {"bond": .55, "equity": .15, "gold": .20, "commodity": .05, "stocks": .05}}]}
     else:
-        raise ValueError("可选 cross-border-allocation、qdii-equity-allocation、domestic-allocation、vix-dynamic-allocation、risk-parity-allocation。")
+        raise ValueError("可选预设为 " + "、".join(PRESET_NAMES) + "。")
     return copy.deepcopy(c)
 
 

@@ -16,6 +16,22 @@ def date_series(series):
     return pd.to_datetime(series.astype(str), format="mixed", errors="coerce").dt.normalize()
 
 
+def benchmark_start(data, benchmark, day, at_open):
+    """总收益指数部分日期只有收盘点位，开盘回测用前一交易日收盘作为参照。"""
+    code = benchmark["code"]
+    if not at_open:
+        return data.prices.at[day, code], day, "close"
+    if data.open_prices is not None and code in data.open_prices:
+        price = data.open_prices.at[day, code]
+        if pd.notna(price) and price > 0:
+            return price, day, "open"
+    preceding = data.calendar[data.calendar < day]
+    if benchmark.get("kind") == "index" and len(preceding) and code in data.prices:
+        prior = preceding[-1]
+        return data.prices.at[prior, code], prior, "close"
+    return np.nan, day, "open"
+
+
 @dataclass
 class Dataset:
     prices: pd.DataFrame
@@ -24,12 +40,20 @@ class Dataset:
     features: pd.DataFrame
     macro: pd.DataFrame
     provenance: dict
+    open_prices: pd.DataFrame | None = None
+    open_buyable: pd.DataFrame | None = None
+    open_sellable: pd.DataFrame | None = None
+    close_buyable: pd.DataFrame | None = None
+    close_sellable: pd.DataFrame | None = None
 
     @classmethod
     def load(cls, directory):
         import json
         root = Path(directory)
-        raw = pd.read_csv(root / "prices.csv", dtype={"code": str}, low_memory=False)
+        columns = {"date", "code", "currency", "close_adjusted", "open_adjusted", "price_valid", "tradable",
+                   "price_available_at", "volume_native", "buyable_at_open", "sellable_at_open",
+                   "buyable_at_close", "sellable_at_close"}
+        raw = pd.read_csv(root / "prices.csv", dtype={"code": str}, low_memory=False, usecols=columns.__contains__)
         required = {"date", "code", "close_adjusted"}
         if not required.issubset(raw):
             raise ValueError("prices.csv 需要 date、code、close_adjusted。")
@@ -56,12 +80,33 @@ class Dataset:
         dates = pd.DatetimeIndex(date_series(cal["date"]).dropna()).unique().sort_values()
         px = raw.pivot(index="date", columns="code", values="close_adjusted").reindex(dates)
         tradable = raw.pivot(index="date", columns="code", values="can_trade").reindex(dates).eq(True)
+
+        def permitted(field, quoted):
+            if field not in raw:
+                return quoted
+            raw[field] = raw[field].isna() | booleans(raw[field])
+            flags = raw.pivot(index="date", columns="code", values=field).reindex(dates).eq(True)
+            return quoted & flags
+
+        close_buyable = permitted("buyable_at_close", tradable)
+        close_sellable = permitted("sellable_at_close", tradable)
+        opening = open_buyable = open_sellable = None
+        if "open_adjusted" in raw:
+            raw["open_adjusted"] = pd.to_numeric(raw["open_adjusted"], errors="coerce")
+            opening = raw.pivot(index="date", columns="code", values="open_adjusted").reindex(dates)
+            opening = opening.where(opening.gt(0) & np.isfinite(opening))
+            open_buyable = permitted("buyable_at_open", opening.notna())
+            open_sellable = permitted("sellable_at_open", opening.notna())
         features = pd.DataFrame()
         if (root / "stock_features.csv").exists():
             features = pd.read_csv(root / "stock_features.csv", dtype={"code": str})
-            for col in ["snapshot_date", "ann_date", "annual_ann_date", "end_date", "annual_end_date", "list_date", "delist_date"]:
-                features[col] = date_series(features[col])
-            features["consecutive_years"] = booleans(features["consecutive_years"])
+            date_fields = {"snapshot_date", "ann_date", "annual_ann_date", "end_date", "annual_end_date", "list_date",
+                           "delist_date", "pub_date", "dividend_pub_date", "statement_period"}
+            for col in features:
+                if col in date_fields or col.endswith("_member_asof"):
+                    features[col] = date_series(features[col])
+                if col in {"consecutive_years", "signal_tradable"} or col.endswith("_member"):
+                    features[col] = booleans(features[col])
         macro = pd.read_csv(root / "macro_observations.csv") if (root / "macro_observations.csv").exists() else pd.DataFrame()
         if not macro.empty:
             macro["available_at"] = pd.to_datetime(macro["available_at"], utc=True, format="mixed", errors="coerce")
@@ -93,4 +138,5 @@ class Dataset:
             }
         if coverage_ends:
             meta["calendar_coverage_end"] = str(min(pd.Timestamp(end) for end in coverage_ends).date())
-        return cls(px, tradable, dates, features, macro, meta)
+        return cls(px, tradable, dates, features, macro, meta, opening, open_buyable, open_sellable,
+                   close_buyable, close_sellable)

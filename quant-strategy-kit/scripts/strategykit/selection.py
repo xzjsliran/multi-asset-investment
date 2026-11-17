@@ -6,6 +6,8 @@ import pandas as pd
 from scipy.optimize import minimize
 import operator
 
+from .equity_selection import METHOD, select_equities
+
 
 def minimum_variance(returns, max_weight=1., shrinkage=.1):
     """min w'Σw，long-only；收缩协方差让相似股票的优化更稳定。"""
@@ -124,8 +126,10 @@ def active_assets(sleeve, execute):
     ]
 
 
-def select_and_weight(sleeve, signal, execute, prices, features):
+def select_and_weight(sleeve, signal, execute, prices, features, held=(), opening_codes=None):
     selection, weighting = sleeve["selection"], sleeve["weighting"]
+    if selection["method"] == METHOD:
+        return select_equities(sleeve, features, signal, execute, held, opening_codes)
     notes, audit = [], {"sleeve": sleeve["id"], "signal_date": str(signal.date()),
                         "execution_date": str(execute.date()), "method": weighting["method"]}
     past = prices.loc[:signal]  # 唯一的价格窗口入口。

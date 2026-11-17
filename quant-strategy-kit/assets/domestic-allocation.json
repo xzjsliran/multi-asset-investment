@@ -5,7 +5,8 @@
   "end": "2025-12-31",
   "base_currency": "CNY",
   "initial_capital": 1000000,
-  "allocation_rebalance": "quarterly",
+  "position_policy": "long_only",
+  "allocation_rebalance": "monthly",
   "max_valuation_gap": 10,
   "benchmark": {
     "code": "510300.SH",
@@ -20,7 +21,7 @@
       "id": "bond",
       "name": "境内国债",
       "weight": 0.4,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "511010.SH",
@@ -39,7 +40,7 @@
       "id": "equity",
       "name": "股票宽基",
       "weight": 0.25,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "510300.SH",
@@ -58,7 +59,7 @@
       "id": "gold",
       "name": "黄金",
       "weight": 0.15,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "518880.SH",
@@ -77,7 +78,7 @@
       "id": "commodity",
       "name": "商品",
       "weight": 0.1,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "159980.SZ",
@@ -104,36 +105,22 @@
     },
     {
       "id": "stocks",
-      "name": "A股动量组合",
+      "name": "主动A股",
       "weight": 0.1,
       "rebalance": "monthly",
-      "assets": [
-        {
-          "code": "600519.SH",
-          "name": "贵州茅台",
-          "kind": "stock"
-        },
-        {
-          "code": "000001.SZ",
-          "name": "平安银行",
-          "kind": "stock"
-        }
-      ],
+      "assets": [],
       "selection": {
-        "method": "momentum",
-        "lookback": 60,
-        "top_n": 2,
-        "min_return": 0.0,
-        "fill_shortfall": "cash"
+        "method": "quality_value_dividend",
+        "universe": "csi800",
+        "top_n": 20,
+        "buffer_rank": 40,
+        "max_per_industry": 2,
+        "small_cap_weight": 0.1
       },
       "weighting": {
-        "method": "min_variance",
-        "lookback": 60,
-        "min_observations": 40,
-        "max_weight": 1.0,
-        "shrinkage": 0.1
+        "method": "inverse_volatility",
+        "max_weight": 0.08
       }
     }
-  ],
-  "position_policy": "long_only"
+  ]
 }

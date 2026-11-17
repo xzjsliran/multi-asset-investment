@@ -36,7 +36,7 @@ def event_on(config, calendar, execution_date, initial=False):
 
 
 def decide(config, data, execution_date, signal_date, current_values, sleeve_cash,
-           inner, previous_alloc, new_ids, is_outer):
+           inner, previous_alloc, new_ids, is_outer, opening_codes=None):
     """current_values: {sleeve: {code: CNY}}；现金同币种估值，全部非负。
 
     信号只读 signal_date 及之前的数据；估值由调用方显式提供。
@@ -60,7 +60,8 @@ def decide(config, data, execution_date, signal_date, current_values, sleeve_cas
         raise ValueError("账户总资产须大于零。")
     audits, selected = [], []
     def select(sid):
-        w, chosen, audit = select_and_weight(sleeves[sid], signal, day, data.prices, data.features)
+        held = [code for code, value in current_values.get(sid, {}).items() if value > 1e-7]
+        w, chosen, audit = select_and_weight(sleeves[sid], signal, day, data.prices, data.features, held, opening_codes)
         nonnegative(w.values(), "部分内权重", 1.)
         inner[sid] = w
         audits.append(audit)

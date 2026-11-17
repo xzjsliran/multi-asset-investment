@@ -10,12 +10,14 @@ import pandas as pd
 
 from .config import all_assets, write_json, validate
 from .costs import COST_FIELDS
+from .data import benchmark_start
 from .engine import backtest
+from .equity_selection import METHOD
 
 
 # 即使本次没有成交、选股或缺口，也保留固定表头供报告读取。
 TABLE_COLUMNS = {
-    "daily": ["date", "nav", "equity", "return", "cash_weight", "drawdown", "transaction_cost", *COST_FIELDS],
+    "daily": ["date", "nav", "equity", "return", "cash_weight", "drawdown", "transaction_cost", "turnover", *COST_FIELDS],
     "weights": ["date", "sleeve", "code", "value", "weight"],
     "trades": ["date", "signal_date", "sleeve", "code", "amount", "side", "cost", *COST_FIELDS, "internal_transfer"],
     "selections": ["signal_date", "execution_date", "sleeve", "code", "name", "within_weight"],
@@ -51,8 +53,8 @@ def review_execution(config, result, checks, omitted):
         method, fallback = "fixed", []
     if fallback and len(fallback) == len(regimes):
         status = "method_not_evaluated"
-    elif fallback or omitted or any(checks[key] for key in (
-        "fallback_equal_count", "blocked_attempts", "long_valuation_gap_rows", "missing_macro_count"
+    elif fallback or omitted or any(checks.get(key, 0) for key in (
+        "fallback_equal_count", "blocked_attempts", "long_valuation_gap_rows", "missing_macro_count", "selection_shortfall_count"
     )):
         status = "limited"
     else:
@@ -113,26 +115,32 @@ def export_results(config, data, out, compare_equal=True):
             static["allocation"] = {"method": "fixed"}
         add_comparison("static", "固定权重、同样调仓日", backtest(static, data)["daily"], "static_daily.csv")
     benchmark = config.get("benchmark", {}).get("code")
+    at_open = config.get("execution_price") == "open"
     omitted = []
     if benchmark:
         p = data.prices.reindex(index=daily["date"], columns=[benchmark])[benchmark]
-        if p.notna().all():
-            b = pd.DataFrame({"date": daily["date"].values, "nav": (p / p.iloc[0]).values})
+        first, anchor, mark = (benchmark_start(data, config["benchmark"], daily["date"].iloc[0], at_open)
+                               if p.notna().all() else (np.nan, None, None))
+        if np.isfinite(first) and first > 0:
+            b = pd.DataFrame({"date": daily["date"].values, "nav": (p / first).values})
             b["return"] = b["nav"].pct_change(fill_method=None).fillna(0)
+            b.at[0, "return"] = b.at[0, "nav"] - 1
             b["equity"] = b["nav"] * config["initial_capital"]
             b["drawdown"] = b["nav"] / b["nav"].cummax().clip(lower=1) - 1
             b["transaction_cost"] = 0.  # 市场基准为费前价格参照，不模拟券商成交。
+            b["turnover"] = 0.
             add_comparison("benchmark", benchmark + " 持有", b, "benchmark_daily.csv")
+            comparison[-1].update(anchor_date=str(anchor.date()), anchor_price=mark)
         else:
-            omitted.append({"scenario": "benchmark", "code": benchmark, "reason": "基准行情未完整覆盖回测日期"})
+            omitted.append({"scenario": "benchmark", "code": benchmark, "reason": "基准缺少完整行情或可用的起算点位"})
     annual = daily.groupby(daily["date"].dt.year)["return"].agg(
         lambda x: float((1+x).prod()-1)).rename("return").reset_index().rename(columns={"date": "year"})
     if not np.isclose((1 + annual["return"]).prod(), daily["nav"].iloc[-1], atol=1e-10):
         raise AssertionError("年度收益连乘未能还原总收益。")
 
     roles = {"daily": "当前策略每日账户", "weights": "收盘调仓后的实际持仓",
-             "trades": "实际成交记录", "selections": "选中证券及当时的筛选字段",
-             "targets": "各次调仓目标", "blocked": "缺报价而未执行的成交尝试", "valuation_gaps": "长期缺报价的估值记录"}
+             "trades": "模拟成交及内部划转记录", "selections": "选中证券及当时的筛选字段",
+             "targets": "各次调仓目标", "blocked": "受约束的交易差额", "valuation_gaps": "长期缺报价的估值记录"}
     for key, columns in TABLE_COLUMNS.items():
         df = result[key]
         df = df.reindex(columns=columns + [c for c in df.columns if c not in columns])
@@ -153,6 +161,7 @@ def export_results(config, data, out, compare_equal=True):
               "contribution_error": float(sum(result["contributions"].values())-(summary["final_equity"]-config["initial_capital"])),
               "future_signal_trades": int((pd.to_datetime(result["trades"]["signal_date"]) >= pd.to_datetime(result["trades"]["date"])).sum()) if not result["trades"].empty else 0,
               "fallback_equal_count": fallback, "missing_macro_count": missing_macro,
+              "selection_shortfall_count":sum(x["status"] == "selection_shortfall" for x in result["optimization"]),
               "risk_allocation_fallback_count": sum(x.get("method") == "risk_parity" and x.get("status") != "success" for x in result["regimes"]),
               "blocked_attempts": len(result["blocked"]), "long_valuation_gap_rows": len(result["valuation_gaps"]),
               "transaction_cost": summary["transaction_cost"],
@@ -164,14 +173,15 @@ def export_results(config, data, out, compare_equal=True):
     execution = review_execution(config, result, checks, omitted)
     notes = ["所有资产只做多；目标权重及持仓非负，不使用融资杠杆。",
              "回测按成交额计佣金及滑点，A股卖出按已确认费率计印花税。建仓时扣费，现金收益为零，允许分数份额。",
-             "信号日收盘形成规则，下一中国交易日收盘记账；当日收益先归旧持仓，再调仓。",
+             ("按上一个交易日信号在下期首个交易日开盘执行差额，收盘估值。基准以首个执行日开盘水平起算。"
+              if at_open else "信号日收盘形成目标，下一中国交易日收盘按持仓差额调仓。当日收益先归旧持仓，回测截止日保留持仓估值。"),
              "复权单位用于收益记账；未完整模拟涨跌停和整手成交。",
              "境内QDII使用其自身人民币场内价格，包含市场折溢价的变化；不重复乘汇率。"]
     if any(a["kind"] == "us_etf" for a in all_assets(config)):
         notes.append("直接美国ETF按已知汇率折成人民币，成交采用已完成报价的日线近似。")
     if config.get("allocation", {}).get("method") == "risk_parity":
         notes.append("大类风险平价采用事先配置的代理篮子及信号日前收益；目标风险贡献基于收缩协方差，实际组合风险贡献由回测盈亏另行计算。代理估计不等于实际持仓的历史业绩。")
-    if any(s["selection"]["method"] in {"quality_value", "fundamental"} for s in config["sleeves"]):
+    if any(s["selection"]["method"] in {"quality_value", "fundamental", METHOD} for s in config["sleeves"]):
         notes.append("财务按公告日过滤；供应商的历史财务修订及行业回溯仍可能影响结果。")
     if any(s["selection"]["method"] == "momentum" for s in config["sleeves"]):
         notes.append("动量选择使用配置中的明确候选池。")
@@ -183,7 +193,7 @@ def export_results(config, data, out, compare_equal=True):
         "base_currency": config.get("base_currency", "CNY"), "initial_capital": config["initial_capital"],
         "start": summary["start"], "end": summary["end"],
         "units": {"money": "CNY", "return_weight_volatility_drawdown": "decimal", "nav": "initial_1"},
-        "conventions": {"position_policy": "long_only", "execution": "signal_close_then_next_CN_session_close", "daily_weights": "after_rebalance",
+        "conventions": {"position_policy": "long_only", "execution": "signal_close_then_next_CN_session_open" if at_open else "signal_close_then_next_CN_session_close", "daily_weights": "after_rebalance",
                         "opening_return": "from_initial_capital",
                         "trade_amount": "buy_positive_sell_negative", "annualization_days": 252,
                         "cagr_years": "calendar_days_between_first_and_last_row_divided_by_365.25", "risk_free_rate": 0,

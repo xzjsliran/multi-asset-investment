@@ -4,6 +4,8 @@ from __future__ import annotations
 import pandas as pd
 
 from .config import all_assets, schedule
+from .data import benchmark_start
+from .equity_selection import DEFAULT_POOL, FIELDS, METHOD, pool_snapshot
 from .risk import proxy_returns
 from .regime import allocation
 from .selection import active_assets
@@ -112,7 +114,7 @@ def check_fundamentals(config, data, blockers):
     """核对历史选股所需的财务截面时点。"""
     sleeves = [
         sleeve for sleeve in config["sleeves"]
-        if sleeve["selection"]["method"] in {"quality_value", "fundamental"}
+        if sleeve["selection"]["method"] in {"quality_value", "fundamental", METHOD}
     ]
     if not sleeves:
         return
@@ -121,6 +123,23 @@ def check_fundamentals(config, data, blockers):
         if "snapshot_date" in data.features else pd.DatetimeIndex([])
     )
     for sleeve in sleeves:
+        if sleeve["selection"]["method"] == METHOD:
+            missing = sorted(FIELDS - set(data.features))
+            events = schedule(data.calendar, config["start"], config["end"], sleeve["rebalance"])
+            universe = sleeve["selection"].get("universe", DEFAULT_POOL)
+            bad = []
+            for signal in events.values():
+                if not missing:
+                    try:
+                        pool_snapshot(data.features, signal, universe)
+                        continue
+                    except ValueError:
+                        pass
+                bad.append(date_text(signal))
+            if missing or bad:
+                blockers.append(issue("missing_equity_factor_snapshot", "缺少指定股票池的历史因子截面。",
+                                      sleeve=sleeve["id"], universe=universe, missing_fields=missing, signal_dates=bad))
+            continue
         max_age = sleeve["selection"].get("snapshot_max_age_days", 7)
         events = schedule(data.calendar, config["start"], config["end"], sleeve["rebalance"])
         for signal in events.values():
@@ -197,13 +216,20 @@ def preview(config, data):
         risk_window = check_risk_window(config, data, warnings, blockers)
         check_fundamentals(config, data, blockers)
         check_macro(config, data, warnings)
+    if config.get("execution_price") == "open" and data.open_prices is None:
+        blockers.append(issue("missing_open_prices", "开盘执行需要后复权开盘价。"))
     if blockers:
         options.append({
             "action": "supply_data",
             "message": "可提供同一证券、同一计价及复权口径的数据。修改证券或区间前应取得用户确认。",
         })
     benchmark = config.get("benchmark")
-    if benchmark and data.prices.reindex(index=sessions, columns=[benchmark["code"]]).isna().any().iloc[0]:
+    missing_benchmark = benchmark and (not len(sessions) or
+                        data.prices.reindex(index=sessions, columns=[benchmark["code"]]).isna().any().iloc[0])
+    if benchmark and not missing_benchmark:
+        level, _, _ = benchmark_start(data, benchmark, sessions[0], config.get("execution_price") == "open")
+        missing_benchmark = pd.isna(level) or level <= 0
+    if missing_benchmark:
         warnings.append({
             "code": "benchmark_coverage",
             "message": "基准行情未完整覆盖研究区间，配套报告将说明该对照缺失。",

@@ -211,6 +211,49 @@ class RebalanceRules(unittest.TestCase):
         self.assertEqual([x['projected_quantity'] for x in p['holdings']],[50,50])
         validate_plan(p)
 
+    def test_transfer_smaller_than_buy_lot_does_not_sell_shared_security(self):
+        c, d, a, r, q = fixture()
+        c["sleeves"][1]["assets"][0]["code"] = "A"
+        a["positions"][0].update(quantity=53., available_quantity=53.)
+        a["positions"][1].update(code="A", quantity=47., available_quantity=47.)
+        q["quotes"][0].update(buy_lot=100., sell_lot=1.)
+        for commission, minimum in [(0., 0.), (.001, 0.), (.001, 50.)]:
+            with self.subTest(commission=commission, minimum=minimum):
+                r["minimum_trade_value_cny"] = minimum
+                c["transaction_costs"] = {"commission_rate": commission}
+                plan = make_plan(c, d, a, r, q)
+                self.assertEqual(plan["orders"], [])
+                self.assertEqual(plan["transaction_costs"]["estimated_total_cny"], 0.)
+                self.assertEqual([x["projected_quantity"] for x in plan["holdings"]], [50., 50.])
+                validate_plan(plan)
+        a["positions"][0]["available_quantity"] = 1.
+        plan = make_plan(c, d, a, r, q)
+        self.assertEqual(plan["orders"], [])
+        self.assertEqual([x["projected_quantity"] for x in plan["holdings"]], [52., 48.])
+        self.assertTrue(plan["issues"])
+        validate_plan(plan)
+
+    def test_independent_sleeves_transfer_at_net_cost_before_rounding(self):
+        c, d, a, r, q = fixture()
+        c["allocation_rebalance"] = "quarterly"
+        c["transaction_costs"] = {"commission_rate": .01, "stamp_duty_rate": .005}
+        a["as_of"] = r["as_of"] = "2025-05-30T16:00:00+08:00"
+        r["execution_date"] = "2025-06-02"
+        for quote in q["quotes"]:
+            quote["available_at"] = r["as_of"]
+            quote["buy_lot"] = 100.
+        for sleeve, new_code in zip(c["sleeves"], ["B", "A"]):
+            sleeve["assets"][0].update(code=new_code, kind="stock")
+        for position in a["positions"]:
+            position.update(quantity=50., available_quantity=50.)
+        plan = make_plan(c, d, a, r, q)
+        self.assertFalse(plan["event"]["is_outer"])
+        self.assertEqual(plan["orders"], [])
+        self.assertEqual(plan["transaction_costs"]["estimated_total_cny"], 0.)
+        self.assertEqual({(x["sleeve"], x["code"]): x["projected_quantity"] for x in plan["holdings"]
+                          if x["projected_quantity"]}, {("equity", "B"): 50., ("bond", "A"): 50.})
+        validate_plan(plan)
+
     def test_weekly_internal_event_preserves_bond_units_and_cash(self):
         c,d,a,r,q=fixture()
         c['allocation_rebalance']='quarterly'

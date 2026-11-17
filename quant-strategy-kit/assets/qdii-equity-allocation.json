@@ -6,7 +6,7 @@
   "base_currency": "CNY",
   "initial_capital": 1000000,
   "position_policy": "long_only",
-  "allocation_rebalance": "quarterly",
+  "allocation_rebalance": "monthly",
   "max_valuation_gap": 10,
   "benchmark": {
     "code": "510300.SH",
@@ -21,8 +21,8 @@
     {
       "id": "bond",
       "name": "美元短债",
-      "weight": 0.5,
-      "rebalance": "quarterly",
+      "weight": 0.25,
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "SHY",
@@ -38,10 +38,29 @@
       }
     },
     {
+      "id": "bond_cny",
+      "name": "人民币长债",
+      "weight": 0.25,
+      "rebalance": "monthly",
+      "assets": [
+        {
+          "code": "511260.SH",
+          "name": "上证10年期国债ETF",
+          "kind": "etf"
+        }
+      ],
+      "selection": {
+        "method": "fixed"
+      },
+      "weighting": {
+        "method": "equal"
+      }
+    },
+    {
       "id": "gold",
       "name": "黄金",
       "weight": 0.1,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "518880.SH",
@@ -60,7 +79,7 @@
       "id": "equity",
       "name": "A股宽基",
       "weight": 0.1,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "510300.SH",
@@ -79,7 +98,7 @@
       "id": "overseas_broad",
       "name": "海外股票宽基（标普500）",
       "weight": 0.1,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "513500.SH",
@@ -101,7 +120,7 @@
       "id": "overseas_growth",
       "name": "海外股票成长（纳斯达克100）",
       "weight": 0.1,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "513100.SH",
@@ -123,34 +142,19 @@
       "id": "stocks",
       "name": "主动A股",
       "weight": 0.1,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [],
       "selection": {
-        "method": "quality_value",
-        "universe": "all_a",
-        "top_n": 5,
-        "leaders_per_industry": 5,
-        "max_per_industry": 1,
-        "min_roe": 8,
-        "max_pe_ttm": 60,
-        "max_pe": 80,
-        "max_debt": 80,
-        "positive_two_years": true,
-        "min_listing_days": 365,
-        "snapshot_max_age_days": 7,
-        "score_weights": {
-          "quality": 0.5,
-          "value": 0.35,
-          "size": 0.15
-        },
-        "fill_shortfall": "cash"
+        "method": "quality_value_dividend",
+        "universe": "csi800",
+        "top_n": 20,
+        "buffer_rank": 40,
+        "max_per_industry": 2,
+        "small_cap_weight": 0.1
       },
       "weighting": {
-        "method": "min_variance",
-        "lookback": 126,
-        "min_observations": 60,
-        "max_weight": 0.4,
-        "shrinkage": 0.1
+        "method": "inverse_volatility",
+        "max_weight": 0.08
       }
     }
   ]

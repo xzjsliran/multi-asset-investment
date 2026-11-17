@@ -29,12 +29,12 @@ def get(url, params=None):
     return r
 
 
-def ts_query(api, **params):
+def ts_query(api, *, session=None, **params):
     token = token_value()
     if not token:
         raise ValueError("本地尚未配置 Tushare token；可先使用 provider=free。")
     fields = params.pop("fields", "")
-    r = requests.post("https://api.tushare.pro", json={"api_name": api, "token": token,
+    r = (session or requests).post("https://api.tushare.pro", json={"api_name": api, "token": token,
                       "params": params, "fields": fields}, timeout=(8, 25))
     r.raise_for_status()
     body = r.json()

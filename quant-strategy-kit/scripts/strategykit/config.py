@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 from .costs import normalize_costs, rate
+from .equity_selection import DEFAULT_POOL, METHOD, pool_request
 
 ROOT = Path(__file__).resolve().parents[2]
 FREQUENCIES = {"weekly": "W-FRI", "monthly": "M", "quarterly": "Q-DEC"}
@@ -49,8 +50,10 @@ def validate(config):
         c["transaction_costs"] = normalize_costs(c["transaction_costs"])
     if c.get("long_gap_policy", "error") not in {"error", "carry_and_flag"}:
         raise ValueError("长期估值缺口处理为 error 或 carry_and_flag。")
-    if c.get("allocation_rebalance") not in FREQUENCIES:
+    if c.setdefault("allocation_rebalance", "monthly") not in FREQUENCIES:
         raise ValueError("总配置调仓支持 weekly、monthly、quarterly。")
+    if c.get("execution_price", "close") not in {"open", "close"}:
+        raise ValueError("execution_price 使用 open 或 close。")
     sleeves = c.get("sleeves", [])
     ids = [s["id"] for s in sleeves]
     if not sleeves or len(ids) != len(set(ids)) or "cash" in ids:
@@ -62,8 +65,8 @@ def validate(config):
         if s["rebalance"] not in FREQUENCIES:
             raise ValueError("调仓频率只能是 weekly、monthly、quarterly。")
         sel = s.setdefault("selection", {"method": "fixed"})
-        if sel["method"] not in {"fixed", "momentum", "quality_value", "fundamental"}:
-            raise ValueError("选股方法为 fixed、momentum、quality_value、fundamental。")
+        if sel["method"] not in {"fixed", "momentum", "quality_value", "fundamental", METHOD}:
+            raise ValueError("未知选股方法：" + sel["method"])
         if sel["method"] == "fundamental":
             for cond in sel.get("filters", []):
                 if cond.get("op") not in {">", ">=", "<", "<=", "=="}:
@@ -80,8 +83,24 @@ def validate(config):
             if a.get("side", "long") != "long":
                 raise ValueError("所有资产只做多，不接受空头证券配置。")
         w = s.setdefault("weighting", {"method": "equal"})
-        if w["method"] not in {"equal", "fixed", "min_variance"}:
-            raise ValueError("配权方法为 equal、fixed、min_variance。")
+        if w["method"] not in {"equal", "fixed", "min_variance", "inverse_volatility"}:
+            raise ValueError("未知配权方法：" + w["method"])
+        if sel["method"] == METHOD:
+            pool_request(sel.get("universe", DEFAULT_POOL))
+            if w["method"] != "inverse_volatility":
+                raise ValueError("质量价值红利低波使用倒数波动率配权。")
+            for field, default, minimum in [("top_n", 20, 1), ("max_per_industry", 2, 1), ("buffer_rank", 0, 0)]:
+                value = sel.get(field, default)
+                if type(value) is not int or value < minimum:
+                    raise ValueError(f"{field} 必须为不小于 {minimum} 的整数。")
+            size_weight = sel.get("small_cap_weight", 0.)
+            if type(size_weight) not in (int, float) or not 0. <= size_weight <= .70:
+                raise ValueError("small_cap_weight 须为 0 至 0.70 之间的数值。")
+            w.setdefault("max_weight", .08)
+            if not 0 < w["max_weight"] <= 1:
+                raise ValueError("倒数波动率的单股权重上限须在 (0,1]。")
+        elif w["method"] == "inverse_volatility":
+            raise ValueError("倒数波动率配权需要质量价值红利低波的 120 日波动率截面。")
         if w["method"] == "min_variance":
             if not 0 < w.get("max_weight", 1) <= 1 or not 0 <= w.get("shrinkage", .1) <= 1:
                 raise ValueError("最小方差上限需在 (0,1]，收缩系数需在 [0,1]。")
@@ -186,7 +205,7 @@ def all_assets(c):
 
 
 def data_plan(c):
-    stocks = [s for s in c["sleeves"] if s["selection"]["method"] in {"quality_value", "fundamental"}]
+    stocks = [s for s in c["sleeves"] if s["selection"]["method"] in {"quality_value", "fundamental", METHOD}]
     macro = c.get("macro", {})
     indicators = sorted({p["series"] for r in macro.get("rules", [])
                          for p in r.get("all", []) + r.get("any", [])}) if macro.get("enabled") else []
@@ -198,6 +217,9 @@ def data_plan(c):
             "assets": all_assets(c), "macro": indicators,
             "fundamental_selection": bool(stocks),
             "fundamental_frequencies": sorted({s["rebalance"] for s in stocks}),
+            "equity_factor_pools": [{"sleeve": s["id"], "frequency": s["rebalance"],
+                                     **pool_request(s["selection"].get("universe", DEFAULT_POOL))}
+                                    for s in stocks if s["selection"]["method"] == METHOD],
             "source_notes": ["境内行情沿用第一部分的数据模块。",
                              "财务选股需要历史估值、财报公告日、历史行业和名称；通过本地 Tushare 或已有 research 原始快照获取。",
                              "美国 ETF 用复权价格，按已知 USD/CNY 换算人民币；每条美股报价从下一次中国决策时点起使用。"]}

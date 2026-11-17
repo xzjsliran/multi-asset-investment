@@ -205,6 +205,7 @@ def track(workspace, tasks=(), runs=(), data=None, report=None):
 
 def status(workspace, study):
     from strategykit.costs import costs_for
+    from strategykit.equity_selection import DEFAULT_POOL, METHOD
 
     version = study["revisions"][-1]
     history = [
@@ -221,6 +222,8 @@ def status(workspace, study):
             "start": config["start"], "end": config["end"],
             "allocation_rebalance": config["allocation_rebalance"],
             "sleeve_rebalance": {sleeve["id"]: sleeve["rebalance"] for sleeve in config["sleeves"]},
+            "sleeve_universe": {sleeve["id"]: sleeve["selection"].get("universe", DEFAULT_POOL)
+                                for sleeve in config["sleeves"] if sleeve.get("selection", {}).get("method") == METHOD},
             "transaction_costs": None if unresolved_cost else costs_for(config),
             "cost_confirmation_needed": unresolved_cost,
         }

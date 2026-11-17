@@ -20,7 +20,7 @@ from strategykit.engine import backtest
 from strategykit.selection import minimum_variance, select_and_weight, quality_value
 from strategykit.regime import allocation, observation
 from strategykit.results import export_results, TABLE_COLUMNS
-from strategykit.presets import preset
+from strategykit.presets import PRESET_NAMES, preset
 from quantkit.overseas import align_us
 from quantkit.fundamentals import build_snapshot, prepare_tables
 from quantkit.vintages import snapshot_events
@@ -82,22 +82,45 @@ class StrategyRules(unittest.TestCase):
                                    daily.equity.diff().fillna(start.equity - 1000.), atol=1e-9)
         self.assertFalse(result["final_state"]["pending"])
 
-    def test_internal_transfer_in_shared_account_has_no_market_fee(self):
+    def test_internal_transfer_in_shared_account_has_no_market_trade_or_fee(self):
         c, d = fixture()
         c["sleeves"][1]["assets"][0]["code"] = "A"
         c["macro"] = {"enabled": True, "rebalance": "quarterly", "rules": [
             {"name": "高波动", "all": [{"series": "vix", "op": ">", "threshold": 20}],
              "weights": {"one": .2, "two": .8}},
         ]}
-        c["transaction_costs"] = {"commission_rate": .001, "stamp_duty_rate": .005}
         d.prices.loc[:, "A"] = 100.
         d.macro = pd.DataFrame([{"series": "vix", "period": "2025-03-31", "value": 30.,
                                  "available_at": pd.Timestamp("2025-03-31T01:00:00Z"), "signal_eligible": True, "source": "synthetic"}])
+        for commission, stamp in [(0., 0.), (.001, .005)]:
+            with self.subTest(commission=commission):
+                c["transaction_costs"] = {"commission_rate": commission, "stamp_duty_rate": stamp}
+                fills = backtest(c, d)["trades"]
+                transfer = fills.loc[fills.date.eq("2025-04-01")]
+                self.assertEqual(len(transfer), 2)
+                self.assertTrue(transfer.internal_transfer.all())
+                self.assertAlmostEqual(transfer.amount.sum(), 0.)
+                self.assertEqual(transfer.cost.sum(), 0.)
+
+    def test_simultaneous_sleeve_rebalances_exchange_existing_shares(self):
+        c, d = fixture()
+        c["end"] = "2025-02-28"
+        c["transaction_costs"] = {"commission_rate": .001, "stamp_duty_rate": .005}
+        for sleeve, before, after in zip(c["sleeves"], ["A", "B"], ["B", "A"]):
+            sleeve["rebalance"] = "monthly"
+            sleeve["assets"] = [{"code": before, "kind": "stock", "until": "2025-02-03"},
+                                {"code": after, "kind": "stock", "from": "2025-02-03"}]
+        d.prices.loc[:, :] = 100.
         result = backtest(c, d)
-        transfers = result["trades"].loc[result["trades"].internal_transfer]
-        self.assertFalse(transfers.empty)
-        self.assertAlmostEqual(transfers["amount"].sum(), 0.)
-        self.assertEqual(transfers["cost"].sum(), 0.)
+        fills = result["trades"]
+        february = fills.loc[fills.date.eq("2025-02-03")]
+        self.assertEqual(len(february), 4)
+        self.assertTrue(february.internal_transfer.all())
+        self.assertEqual(february.cost.sum(), 0.)
+        state = result["final_state"]["books"]
+        for sleeve, held in [("one", "B"), ("two", "A")]:
+            self.assertAlmostEqual(state[sleeve]["units"][held], 5 / 1.001)
+        self.assertEqual(fills.date.max(), pd.Timestamp("2025-02-03"))
 
     def test_result_handoff_can_be_read_without_renderer_or_engine(self):
         c, d = fixture()
@@ -131,14 +154,19 @@ class StrategyRules(unittest.TestCase):
 
         base, qdii = configs[base_name], configs[qdii_name]
         self.assertEqual({sid: s["weight"] for sid, s in base.items()}, {
-            "bond": .50, "gold": .10, "equity": .10, "stocks": .10,
+            "bond": .25, "bond_cny": .25, "gold": .10, "equity": .10, "stocks": .10,
             "overseas_broad": .10, "overseas_growth": .10,
         })
         self.assertEqual(set(qdii), set(base))
         self.assertIn("成长", base["overseas_growth"]["name"])
         self.assertEqual(base["equity"]["assets"][0]["code"], "510300.SH")
         self.assertNotIn("601899.SH", base["stocks"]["selection"].get("exclude", []))
-        for sid in ("bond", "gold", "equity", "stocks"):
+        self.assertEqual(base["bond"]["assets"][0]["code"], "SHY")
+        self.assertEqual(base["bond_cny"]["assets"][0]["code"], "511260.SH")
+        self.assertEqual(base["stocks"]["selection"]["method"], "quality_value_dividend")
+        self.assertEqual(base["stocks"]["selection"]["small_cap_weight"], .10)
+        self.assertEqual(base["stocks"]["selection"]["buffer_rank"], 40)
+        for sid in ("bond", "bond_cny", "gold", "equity", "stocks"):
             self.assertEqual(qdii[sid], base[sid])
         for sid, (direct, mainland) in {
             "overseas_broad": ("SPY", "513500.SH"),
@@ -149,6 +177,18 @@ class StrategyRules(unittest.TestCase):
             self.assertEqual(qdii[sid]["assets"][0]["kind"], "etf")
             self.assertEqual(qdii[sid]["assets"][0]["currency"], "CNY")
             self.assertEqual(qdii[sid]["weight"], base[sid]["weight"])
+
+    def test_presets_are_monthly_and_allow_explicit_quarterly(self):
+        for name in PRESET_NAMES:
+            with self.subTest(name=name):
+                config = validate(preset(name))
+                self.assertEqual(config["allocation_rebalance"], "monthly")
+                self.assertTrue(all(s["rebalance"] == "monthly" for s in config["sleeves"]))
+                if config["macro"].get("enabled"):
+                    self.assertEqual(config["macro"]["rebalance"], "monthly")
+                config["allocation_rebalance"] = "quarterly"
+                config["sleeves"][0]["rebalance"] = "quarterly"
+                self.assertEqual(validate(config)["sleeves"][0]["rebalance"], "quarterly")
 
     def test_first_signal_is_previous_day(self):
         c, d = fixture()
@@ -165,12 +205,15 @@ class StrategyRules(unittest.TestCase):
 
     def test_buy_hold_has_analytic_nav_and_no_daily_rebalance(self):
         c, d = fixture()
-        c["end"] = "2025-03-20"
+        c["end"] = "2025-03-31"
         r = backtest(c, d)
         x = d.prices.loc[c["start"]:c["end"]]
         expected = .5*x.A/x.A.iloc[0] + .5*x.B/x.B.iloc[0]
         np.testing.assert_allclose(r["daily"]["nav"], expected, atol=1e-12)
         self.assertEqual(r["trades"]["date"].nunique(), 1)
+        self.assertTrue(r["trades"].side.eq("buy").all())
+        self.assertGreater(r["final_state"]["books"]["one"]["units"]["A"], 0.)
+        self.assertGreater(r["final_state"]["books"]["two"]["units"]["B"], 0.)
 
     def test_weekly_stock_does_not_rebalance_other_sleeve(self):
         c, d = fixture()
@@ -210,6 +253,25 @@ class StrategyRules(unittest.TestCase):
         bought = r["trades"].loc[(r["trades"].code == "A") & (r["trades"].side == "buy")]
         self.assertEqual(bought.date.iloc[0], pd.Timestamp("2025-01-02"))
         self.assertGreater(r["daily"].cash_weight.iloc[0], .49)
+
+    def test_deferred_buy_does_not_trade_a_completed_position_again(self):
+        c, d = fixture()
+        c["end"] = "2025-01-03"
+        c["sleeves"] = c["sleeves"][:1]
+        c["sleeves"][0]["weight"] = 1.
+        c["sleeves"][0]["assets"].append({"code": "B", "kind": "stock"})
+        d.prices.loc[:, :] = 100.
+        d.prices.loc["2025-01-02":, "A"] = 120.
+        d.tradable.loc["2025-01-01", "B"] = False
+        for commission in [0., .001]:
+            with self.subTest(commission=commission):
+                c["transaction_costs"] = {"commission_rate": commission}
+                result = backtest(c, d)
+                self.assertEqual(list(zip(result["trades"].code, result["trades"].side)),
+                                 [("A", "buy"), ("B", "buy")])
+                self.assertEqual(list(result["trades"].date),
+                                 [pd.Timestamp("2025-01-01"), pd.Timestamp("2025-01-02")])
+                self.assertFalse(result["final_state"]["pending"])
 
     def test_min_variance_analytical_diagonal_covariance(self):
         r = pd.DataFrame({"A": [.02, -.02, .02, -.02], "B": [.01, .01, -.01, -.01]})

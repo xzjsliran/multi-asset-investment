@@ -6,7 +6,7 @@
   "base_currency": "CNY",
   "initial_capital": 1000000,
   "position_policy": "long_only",
-  "allocation_rebalance": "quarterly",
+  "allocation_rebalance": "monthly",
   "max_valuation_gap": 10,
   "benchmark": {
     "code": "510300.SH",
@@ -21,7 +21,7 @@
       "id": "bond",
       "name": "境内国债",
       "weight": 0.4,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "511010.SH",
@@ -40,7 +40,7 @@
       "id": "equity",
       "name": "股票宽基",
       "weight": 0.3,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "510300.SH",
@@ -59,7 +59,7 @@
       "id": "gold",
       "name": "黄金",
       "weight": 0.2,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "518880.SH",
@@ -78,7 +78,7 @@
       "id": "commodity",
       "name": "商品",
       "weight": 0.1,
-      "rebalance": "quarterly",
+      "rebalance": "monthly",
       "assets": [
         {
           "code": "159980.SZ",

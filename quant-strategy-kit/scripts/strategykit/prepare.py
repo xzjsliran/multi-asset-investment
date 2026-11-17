@@ -1,6 +1,7 @@
 """将策略的数据需求交给第一部分；联网获取方法全部留在 quant-data-kit。"""
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 import shutil
 import sys
@@ -53,9 +54,15 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
     for sleeve in config["sleeves"]:
         if sleeve["selection"]["method"] in {"quality_value", "fundamental"}:
             dates.update(schedule(cal["date"], config["start"], config["end"], sleeve["rebalance"]).values())
+    factor_pools = defaultdict(list)
+    for request in plan["equity_factor_pools"]:
+        for signal in schedule(cal["date"], config["start"], config["end"], request["frequency"]).values():
+            factor_pools[signal].append(request)
     features = pd.DataFrame()
     domestic_quality = None
     assets = {a["code"]: a for a in plan["assets"]}
+    if config.get("execution_price") == "open" and any(a["kind"] == "us_etf" for a in assets.values()):
+        raise ValueError("中国开盘执行需要同一时点的开盘价。海外 ETF 的已知收盘价不能用于此模拟。")
     if dates:
         if provider == "free" and not research:
             raise ValueError("质量价值选股所需的历史财务数据需要本地 Tushare 权限；可使用已有归档数据，或切换到不依赖财务数据的境内多资产配置。")
@@ -67,11 +74,26 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
                 picked = quality_value(features, signal, sleeve["selection"])
                 for row in picked.to_dict("records"):
                     assets[row["code"]] = {"code": row["code"], "kind": "stock", "name": row["name"]}
+    factor_prices, factor_coverage = pd.DataFrame(), None
+    if factor_pools:
+        if provider == "free":
+            raise ValueError("多因子选股需要历史估值和三张财报的实际披露日。请使用已配置的 Tushare 或已有的标准研究数据。")
+        from quantkit.equity_factors import prepare_equity_factors
+        benchmark = config.get("benchmark", {})
+        benchmark_code = benchmark["code"] if benchmark.get("kind") == "index" else None
+        factor_prices, factor_features, factor_coverage = prepare_equity_factors(
+            cache / "equity-factors", cal["date"], factor_pools, start, config["end"], benchmark_code, pools=factor_pools,
+        )
+        keys = ["snapshot_date", "code"]
+        features = (factor_features.set_index(keys).combine_first(features.set_index(keys)).reset_index()
+                    if not features.empty else factor_features)
+        features.to_csv(out / "stock_features.csv", index=False, encoding="utf-8-sig", date_format="%Y-%m-%d")
+    factor_codes = set(factor_prices.get("code", []))
+    other_assets = [a for a in assets.values() if a["code"] not in factor_codes]
     if research:
-        prices = research_prices(research, list(assets.values()), cal)
-        prices.to_csv(out / "prices.csv", index=False, encoding="utf-8-sig")
+        prices = research_prices(research, other_assets, cal) if other_assets else pd.DataFrame()
     else:
-        domestic = [a for a in assets.values() if a["kind"] != "us_etf"]
+        domestic = [a for a in other_assets if a["kind"] != "us_etf"]
         if not domestic:
             # 纯海外配置也可用：日历已经取得，不需要伪装成境内行情请求。
             prices = pd.DataFrame()
@@ -92,12 +114,16 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
             macro_file = work / "domestic/macro_observations.csv"
             if macro_file.exists():
                 (out / "macro_observations.csv").write_bytes(macro_file.read_bytes())
-        overseas = [a for a in assets.values() if a["kind"] == "us_etf"]
+        overseas = [a for a in other_assets if a["kind"] == "us_etf"]
         if overseas:
             fx = frame(client.call("us_history", code="CNY=X", start=start, end=config["end"]))
             additions = [align_us(a["code"], frame(client.call("us_history", code=a["code"], start=start, end=config["end"])), fx, cal["date"]) for a in overseas]
             prices = pd.concat([prices, *additions], ignore_index=True)
-        prices.to_csv(out / "prices.csv", index=False, encoding="utf-8-sig")
+    if not factor_prices.empty:
+        prices = pd.concat([prices, factor_prices], ignore_index=True)
+    pending_prices = out / "prices.partial"
+    prices.to_csv(pending_prices, index=False, encoding="utf-8-sig",
+                  float_format="%.12g" if factor_coverage is not None else None)
     if macro_data:
         source = Path(macro_data)
         if source.is_dir():
@@ -107,6 +133,8 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
     write_json(out / "strategy_data_manifest.json", {"created_at": now(), "source": str(Path(research).resolve()) if research else "quant-data-kit",
         "start_with_warmup": start, "end": config["end"], "assets": list(assets.values()), "rows": len(prices),
         "us_alignment": "已完成纽约收盘和已知汇率向后对齐到中国交易日16时；调仓采用该已知报价的低频近似。",
-        "feature_dates": [str(x.date()) for x in sorted(dates)], "requests": client.log,
+        "feature_dates": [str(x.date()) for x in sorted(dates | set(factor_pools))], "requests": client.log,
+        **({"equity_factor_coverage":factor_coverage} if factor_coverage is not None else {}),
         "domestic_status": domestic_quality["status"] if domestic_quality else None})
+    pending_prices.replace(out / "prices.csv")
     return out

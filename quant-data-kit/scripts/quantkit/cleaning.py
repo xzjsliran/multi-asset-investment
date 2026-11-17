@@ -59,7 +59,7 @@ def clean_market(raw, adjusted, asset, calendar, start, end, metadata):
             raise ValueError("行情缺少 " + field)
         raw[field] = pd.to_numeric(raw[field], errors="coerce")
         adjusted[field] = pd.to_numeric(adjusted[field], errors="coerce")
-    a = adjusted[["date", "close"]].rename(columns={"close": "close_adjusted"})
+    a = adjusted[["date", "open", "close"]].rename(columns={"open": "open_adjusted", "close": "close_adjusted"})
     raw = raw.merge(a, on="date", how="left", validate="one_to_one")
     raw = raw.loc[raw["date"].between(pd.Timestamp(start), pd.Timestamp(end))].copy()
     for col in ["volume", "amount"]:
@@ -87,6 +87,8 @@ def clean_market(raw, adjusted, asset, calendar, start, end, metadata):
             valid.loc[mask] = False
     grid["quality_status"] = reason
     grid["price_valid"] = valid
+    # 合并境内外行情时保留各自的交易资格，零成交量只用于估值。
+    grid["tradable"] = valid & (grid["volume"].isna() | grid["volume"].gt(0))
     grid["code"] = asset["code"]
     grid["source"] = metadata["source"]
     grid["currency"] = "CNY"

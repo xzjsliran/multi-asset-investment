@@ -66,6 +66,7 @@ class DataRules(unittest.TestCase):
         raw.loc[1, "high"] = 2
         d, _ = self.clean(raw)
         self.assertFalse(d.iloc[1]["price_valid"])
+        self.assertFalse(d.iloc[1]["tradable"])
         self.assertTrue(pd.isna(d.iloc[2]["return_adjusted"]))
 
     def test_unadjusted_and_adjusted_remain_distinct(self):
@@ -75,6 +76,7 @@ class DataRules(unittest.TestCase):
         d, _ = self.clean(adjusted=adjusted)
         self.assertEqual(d.iloc[0]["close_raw"], 10)
         self.assertEqual(d.iloc[0]["close_adjusted"], 20)
+        self.assertTrue(d.iloc[0]["tradable"])
         self.assertEqual(d.iloc[0]["volume_shares"], 100)
         self.assertEqual(d.iloc[0]["amount_cny"], 10000)
 

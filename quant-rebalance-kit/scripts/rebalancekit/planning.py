@@ -9,8 +9,9 @@ import math
 
 import pandas as pd
 
-from strategykit.costs import COST_FIELDS, asset_kinds, charges_fees, costs_for, trade_cost
+from strategykit.costs import COST_FIELDS, asset_kinds, costs_for, trade_cost
 from strategykit.decision import decide, event_on
+from strategykit.positions import internal_transfers, market_changes, position_changes
 from .inputs import decision_digest, digest, require_confirmation, timestamp, validate_inputs
 from .quotes import validate_quotes
 
@@ -74,7 +75,6 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
         raise ValueError("空仓首次配置请在确认请求中设置initial_allocation=true。")
     event = choose_event(c, a, r, data.calendar)
     costs, kinds = costs_for(c), asset_kinds(c, data.features)
-    fee_enabled = charges_fees(costs)
     execution_date = str(event["execution_date"].date())
     labels = {asset["code"]: asset.get("name", asset["code"]) for s in c["sleeves"] for asset in s.get("assets", [])}
     if not data.features.empty and {"snapshot_date", "code", "historical_name"} <= set(data.features):
@@ -131,7 +131,7 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
     for (sid, code), held in positions.items():
         if held["quantity"] > 0 and quotes[code]["age_days"] > r["max_quote_age_days"]:
             issues.append({"sleeve": sid, "code": code, "reason": "持仓估值沿用较旧报价，需更新后复核计划"})
-    def leg(sid, code, delta):
+    def leg(sid, code, delta, internal=False):
         if abs(delta) < 1e-10:
             return
         q = quotes[code]
@@ -141,29 +141,66 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
         if delta < 0:
             projected[key]["available_quantity"] += delta
         liquid[bucket(sid, q["currency"])] -= delta * q["price"]
-        if delta < 0:
+        if delta < 0 and not internal:
             sell_quantities[code] -= delta
             liquid[bucket(sid, q["currency"])] -= total_fee(code, delta)
         legs.append({"sleeve": sid, "code": code, "signed_quantity": delta,
                      "amount_native": delta*q["price"], "amount_cny": delta*q["price_cny"], "currency": q["currency"]})
+    quantities = {sid: {} for sid in decision["group"]}
+    net_value = defaultdict(float)
     for sid in decision["group"]:
-        codes = sorted(set(current[sid]) | (set(target[sid]) - {"__cash__"}))
-        for code in codes:
-            if code not in quotes:  # 目标为零且原本也未持有时无需报价。
-                continue
+        for code, amount in position_changes(current[sid], target[sid]).items():
             q = quotes[code]
-            held = positions.get((sid, code), {"quantity": 0., "available_quantity": 0.})
-            change = target[sid].get(code, 0.) / q["price_cny"] - held["quantity"]
-            if abs(change)*q["price_cny"] < max(1e-7, r["minimum_trade_value_cny"]):
-                continue
             if not q["usable_for_orders"]:
                 issues.append({"sleeve": sid, "code": code, "reason": "报价过旧或当前不可交易，保留持仓并等待更新"})
                 continue
             if r["mode"] == "live" and q["currency"] != "CNY" and q.get("execution_session") != str(event["execution_date"].date()):
                 issues.append({"sleeve": sid, "code": code, "reason": "该外币证券尚未核实拟执行日的当地交易日历，暂不生成买卖数量"})
                 continue
+            quantities[sid][code] = amount / q["price_cny"]
+            net_value[code] += amount
+    market_codes = {code for code, value in net_value.items() if abs(value) >= r["minimum_trade_value_cny"]}
+    # 内部份额划转先抵消。整手限制只应用于其余需要上市场的差额。
+    transferable = {sid: {code: max(change, -positions[(sid, code)]["available_quantity"]) if change < 0 else change
+                          for code, change in changes.items()} for sid, changes in quantities.items()}
+    moves = list(internal_transfers(transferable))
+    if moves and not event["is_outer"]:
+        # 独立部分仍按币种自筹资金。计入净卖出回款后，再检查是否能完成拟划转。
+        after_transfers = liquid.copy()
+        remaining = copy.deepcopy(quantities)
+        moved_out = defaultdict(float)
+        for seller, buyer, code, quantity in moves:
+            q = quotes[code]
+            after_transfers[bucket(seller, q["currency"])] += quantity * q["price"]
+            after_transfers[bucket(buyer, q["currency"])] -= quantity * q["price"]
+            remaining[seller][code] += quantity
+            remaining[buyer][code] -= quantity
+            moved_out[seller, code] += quantity
+        for sid, changes in market_changes(remaining).items():
+            for code, delta in changes.items():
+                if delta < 0 and code in market_codes:
+                    q = quotes[code]
+                    available = positions[sid, code]["available_quantity"] - moved_out[sid, code]
+                    sell = floor_lot(min(-delta, available), q["sell_lot"])
+                    after_transfers[bucket(sid, q["currency"])] += sell*q["price"] - total_fee(code, -sell)
+        if any(value < -1e-8 for value in after_transfers.values()):
+            moves = []
+    for seller, buyer, code, quantity in moves:
+        leg(seller, code, -quantity, internal=True)
+        leg(buyer, code, quantity, internal=True)
+        quantities[seller][code] += quantity
+        quantities[buyer][code] -= quantity
+    external = market_changes(quantities)
+    for sid, changes in quantities.items():
+        for code, requested in changes.items():
+            q = quotes[code]
+            change = external[sid].get(code, 0.)
+            if abs(requested-change)*q["price_cny"] > .01:
+                issues.append({"sleeve": sid, "code": code, "reason": "内部划转受现金或可卖份额约束，市场订单按账户净差额生成"})
+            if code not in market_codes:
+                continue
             if change < 0:
-                sell = floor_lot(min(-change, held["available_quantity"]), q["sell_lot"])
+                sell = floor_lot(min(-change, projected[(sid, code)]["available_quantity"]), q["sell_lot"])
                 leg(sid, code, -sell)
                 if (-change-sell)*q["price_cny"] > .01:
                     issues.append({"sleeve": sid, "code": code, "reason": "卖出受可卖数量或最小交易单位限制"})
@@ -173,19 +210,7 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
                     issues.append({"sleeve": sid, "code": code, "reason": "买入按最小交易单位取整，余款保留现金"})
                 if buy:
                     buy_requests.append({"sleeve": sid, "code": code, "quantity": buy, "bucket": bucket(sid, q["currency"])})
-    # 组合共享资金时，用已确认可卖的份额完成内部划转，再分配可用于市场买入的现金。
-    unmatched_sells = sell_quantities.copy()
     buy_quantities = defaultdict(float)
-    if event["is_outer"] and fee_enabled:
-        for row in buy_requests:
-            code = row["code"]
-            quantity = floor_lot(min(row["quantity"], unmatched_sells[code]), quotes[code]["buy_lot"])
-            leg(row["sleeve"], code, quantity)
-            liquid[row["bucket"]] += total_fee(code, -quantity)
-            buy_quantities[code] += quantity
-            row["quantity"] -= quantity
-            unmatched_sells[code] -= quantity
-        buy_requests = [row for row in buy_requests if row["quantity"] > 1e-10]
     # 各资金组按币种保留目标现金，外币不足不借款、不隐含兑换。
     reserve = {}
     active_owners = {"portfolio"} if event["is_outer"] else active
@@ -203,39 +228,19 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
     funding_gaps = []
     for b in sorted({row["bucket"] for row in buy_requests}):
         rows = [row for row in buy_requests if row["bucket"] == b]
-        wanted_by_code = defaultdict(float)
-        for row in rows:
-            wanted_by_code[row["code"]] += row["quantity"]
-
-        def buy_cash(code, quantity):
-            # 先匹配已有卖出再计算市场买入。内部转移按原价结算，两边都没有市场费用。
-            matched = min(unmatched_sells[code], quantity)
-            return quantity * quotes[code]["price"] + total_fee(code, quantity - matched) - total_fee(code, -matched)
-
-        wanted = sum(buy_cash(code, quantity) for code, quantity in wanted_by_code.items())
+        wanted = sum(row["quantity"] * quotes[row["code"]]["price"] + total_fee(row["code"], row["quantity"])
+                     for row in rows)
         budget = max(0., liquid[b] - reserve[b])
         if wanted > budget + .01:
             funding_gaps.append({"scope": b[0], "currency": b[1], "required_buy_cash_native": wanted,
                                  "spendable_cash_native": budget, "shortfall_native": wanted-budget})
         ratio = min(1., budget/wanted) if wanted > 0 else 0.
-        if fee_enabled and ratio < 1 and any(unmatched_sells[code] for code in wanted_by_code):
-            low, high = 0., 1.
-            for _ in range(40):
-                middle = (low + high) / 2
-                if sum(buy_cash(code, quantity * middle) for code, quantity in wanted_by_code.items()) <= budget:
-                    low = middle
-                else:
-                    high = middle
-            ratio = low
         for row in rows:
             code = row["code"]
             q = quotes[code]
             quantity = floor_lot(row["quantity"]*ratio, q["buy_lot"])
-            matched = min(unmatched_sells[code], quantity)
-            cost = total_fee(code, quantity - matched) - total_fee(code, -matched)
             leg(row["sleeve"], code, quantity)
-            liquid[b] -= cost
-            unmatched_sells[code] -= matched
+            liquid[b] -= total_fee(code, quantity)
             buy_quantities[code] += quantity
             if quantity < row["quantity"]-1e-8:
                 issues.append({"sleeve": row["sleeve"], "code": row["code"], "reason": f"{q['currency']}买入含费用后受可用现金或保留现金约束，数量缩减"})
@@ -340,7 +345,8 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
                    "orders_netted_by_security": True, "transaction_cost_cny": total_cost, "raw_prices_for_quantities": True},
         "state_if_fully_executed": {"status": "projection_not_execution", "strategy_digest": decision_digest(c),
                     "previous_allocation": decision["allocation"], "inner_weights": decision["inner"]},
-        "notes": ["全部资产只做多；持仓、目标权重和现金均不得为负。卖出仅限已有可卖持仓。",
+        "notes": ["持仓持续保留，订单按目标与当前持仓的差额生成。同一账户的订单按证券合并。",
+                  "全部资产只做多；持仓、目标权重和现金均不得为负。卖出仅限已有可卖持仓。",
                   "买卖数量按列示原始参考价和交易单位估算；执行前更新报价、现金与可卖数量。",
                   "预计净回款和买入支出均已计入选定费用。各币种独立检查资金，外币不足时减少买入。",
                   "比例费用估计未单列最低佣金、独立过户费和换汇费用。",

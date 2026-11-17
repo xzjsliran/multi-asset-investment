@@ -37,8 +37,8 @@ def main():
               "modules":{name:(ROOT/path).exists() for name,path in routes.items()},
               "credentials":status(),"network_requests":0}
     if command == "startup":
-        result["onboarding"] = ["确认研究年份、资产范围、固定/宏观/风险平价配权、调仓频率。",
-            "询问是否有尚未配置的Tushare或iFinD密钥；均为可选，可只用免费源。已有凭证直接复用。",
+        result["onboarding"] = ["确认研究年份、资产范围、固定/宏观/风险平价配权、股票池和调仓频率。",
+            "内置多因子重新取数需要 Tushare，可复用已准备的数据。纯 ETF 研究可用免费源，iFinD 按需配置。",
             "密钥通过本地credentials命令输入，不写入策略配置、报告、安装包。",
             "新增iFinD取数先约定小额度；默认每个工作目录最多4次，优先复用缓存。",
             "实际调仓前确认当前策略、真实持仓、可卖数量、现金和时间。"]
