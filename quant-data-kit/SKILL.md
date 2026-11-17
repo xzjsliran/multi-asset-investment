@@ -47,7 +47,7 @@ description: 为多资产投资研究按用户指定年份准备 ETF、A 股及�
 - 查看 [接口与口径](references/数据接口与口径.md) 选择指标，里面包含中国 PMI/CPI、美国政策利率/CPI/长债收益率/就业、VIX 和全球增长。
 - 需要核对中国宏观公布时点：在配置中填写 `nbs_urls`，或使用 `nbs_crawl_pages` 小范围发现公告。官网连接不通时，允许用户保存原公告 HTML，并通过 `nbs_saved_pages` 提供 URL 和本地文件；不要猜日期。公告解析 CLI：`scripts/run.py nbs --url <官网URL> --out <检查结果.json>`，也可加 `--html <另存的原公告.html>`。
 - 地区宏观及波指按策略的 `data_sources` 接入。国家统计局发布的 PMI、CPI、失业率从原公告复核。逆回购利率使用人行原公告。华创上证 50ETF 与沪深 300 波指分别取数。 [数据来源及配置](references/数据接口与口径.md#宏观时间怎么处理)
-- 本地已有 `FRED_API_KEY` 时，数据准备可自动读取所需的 ALFRED 月度版本。单次历史版本仍可用 `scripts/run.py fred-vintage`，已有宏观事件可通过策略准备命令的 `--macro-data` 传入。
+- 美国月度指标按策略调仓信号日自动下载 ALFRED 历史版本。公开通道无需凭证。已有 `FRED_API_KEY` 时可先用版本区间接口。单次下载用 `scripts/run.py fred-vintage`，已有历史宏观事件可用 `--macro-data` 传入。改变调仓频率后，预检公开快照是否覆盖新的信号日。
 - 用户问市场加息预期：阅读 [美国宏观与利率预期](references/美国宏观与利率预期.md)。官方 FedWatch 下载表用 `scripts/run.py expectations --input <整理后的CSV> --out <新目录>`。实际政策利率、长债收益率、市场预期是不同变量。
 - 上游 AKShare/Tushare Skills 的来源和下载办法见 [安装来源](references/安装来源.md)。它们可作为接口查询参考，本 Skill 的程序不依赖另一个 Skill 才能运行。
 

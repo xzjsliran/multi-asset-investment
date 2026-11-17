@@ -3,16 +3,17 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from quantkit.instruments import bank_rate, deposit_marks, nav_marks
+from quantkit.cleaning import align_macro
 from quantkit.local_volatility import volatility_closes
 from quantkit.providers import nbs_article, pbc_rate_article
-from quantkit.vintages import realtime_events
+from quantkit.vintages import PUBLIC_SNAPSHOT, public_snapshot, realtime_events, snapshot_events
 
 
 class Sources(unittest.TestCase):
@@ -67,6 +68,32 @@ class Sources(unittest.TestCase):
             events = realtime_events("us_unemployment", "2024-01-01", "2024-03-29")
         self.assertEqual(events["value"].tolist(), [3.9, 4.])
         self.assertTrue(events["available_at"].iloc[1].startswith("2024-03-09"))
+
+    def test_public_download_pairs_each_series_with_the_requested_version(self):
+        body = "observation_date,CPIAUCSL_20150810,UNRATE_20150810\n2015-06-01,237.786,5.3\n2015-08-01,250,5.1\n"
+        response = Mock(text=body)
+        args = (["CPIAUCSL", "UNRATE"], ["2015-08-10"], "2015-06-01", "2015-07-31")
+        with patch("quantkit.vintages.requests.get", return_value=response) as get:
+            result = public_snapshot(*args)
+        params = get.call_args.kwargs["params"]
+        self.assertEqual(params["vintage_date"], "2015-08-10,2015-08-10")
+        self.assertNotIn("api_key", params)
+        self.assertEqual(result["date"].unique().tolist(), ["2015-06-01"])
+        self.assertEqual(result["source"].unique().tolist(), [PUBLIC_SNAPSHOT])
+        response.text = body.replace("UNRATE_20150810", "UNRATE_20261117")
+        with patch("quantkit.vintages.requests.get", return_value=response):
+            with self.assertRaisesRegex(ValueError, "请求日期"):
+                public_snapshot(*args)
+
+    def test_macro_alignment_uses_only_the_requested_signal_date(self):
+        v = pd.DataFrame({"date": ["2025-06-01", "2025-07-01", "2025-08-01"], "value": [4.2, 4.3, None],
+                          "series_id": "UNRATE", "vintage_asof": "2025-08-29", "source": PUBLIC_SNAPSHOT})
+        events = snapshot_events(v)
+        calendar = pd.DataFrame({"date": pd.to_datetime(["2025-08-29", "2025-08-30", "2025-09-01"])})
+        aligned = align_macro(events, calendar)
+        self.assertEqual(aligned["value"].notna().tolist(), [False, True, False])
+        self.assertEqual(aligned.iloc[1]["period"], "2025-07")
+        self.assertEqual(aligned.iloc[1]["value"], 4.3)
 
 
 if __name__ == "__main__":

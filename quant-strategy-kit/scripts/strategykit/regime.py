@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import operator
 import math
+from datetime import timedelta
 
 import pandas as pd
 
 OPS = {">": operator.gt, ">=": operator.ge, "<": operator.lt, "<=": operator.le, "==": operator.eq}
+PUBLIC_SNAPSHOT = "alfred_public_snapshot"
 
 
 def known_observations(events, series, signal):
@@ -15,7 +17,12 @@ def known_observations(events, series, signal):
     if events.empty:
         return events, cutoff
     rows = events.loc[events["series"].eq(series) & events["signal_eligible"].eq(True)
-                      & events["available_at"].le(cutoff)].dropna(subset=["value", "available_at"]).copy()
+                      & events["available_at"].le(cutoff)].copy()
+    if "source" in rows and (public := rows["source"].eq(PUBLIC_SNAPSHOT)).any():
+        expected = (cutoff.tz_convert("America/New_York").date() - timedelta(days=1)).isoformat()
+        current = rows.loc[public & rows["vintage"].eq(expected)]
+        # 公开快照是一整幅截面，避免混入之前快照的数值来覆盖本次缺报。
+        rows = current if not current.empty else rows.loc[~public]
     return rows.sort_values("available_at").drop_duplicates("period", keep="last").sort_values("period"), cutoff
 
 
@@ -23,35 +30,39 @@ def observation(events, condition, signal):
     series = condition["series"]
     rows, cutoff = known_observations(events, series, signal)
     if rows.empty:
-        return None, {"series": series, "reason": "该信号日前没有可用的已公布记录"}
+        public = "source" in events and (events["series"].eq(series) & events["source"].eq(PUBLIC_SNAPSHOT)).any()
+        return None, {"series": series, "reason": "本信号日缺少对应 ALFRED 公开快照" if public else "该信号日前没有可用的已公布记录"}
     last = rows.iloc[-1]
+    detail = {"series": series, "period": str(last["period"]), "available_at": last["available_at"].isoformat()}
+    detail.update({key: str(last[key]) for key in ("source", "vintage") if key in last and pd.notna(last[key])})
     age = (cutoff - last["available_at"]).total_seconds() / 86400
     default_age = 800 if series == "world_gdp_growth" else (62 if len(str(last["period"])) == 7 else 14)
     if age > condition.get("max_age_days", default_age):
-        return None, {"series": series, "reason": "最新记录超过设定有效期", "age_days": age}
+        return None, {**detail, "reason": "最新记录超过设定有效期", "age_days": age}
     if len(str(last["period"])) == 7:
         period_age = (signal - pd.Period(last["period"], freq="M").end_time.normalize()).days
         if period_age > condition.get("max_period_age_days", 90):
-            return None, {"series": series, "reason": "快照虽新，统计月份已经过旧"}
+            return None, {**detail, "reason": "快照虽新，统计月份已经过旧"}
     n = int(condition.get("periods", 1))
     transform = condition.get("transform", "level")
     count = n + 1 if transform == "change" else (n if transform == "mean" else 1)
     if len(rows) < count:
-        return None, {"series": series, "reason": "历史期数不足"}
+        return None, {**detail, "reason": "历史期数不足"}
     sample = rows.tail(count)
     if len(str(last["period"])) == 7 and count > 1:
         periods = pd.PeriodIndex(sample["period"], freq="M")
         if any((periods[i].ordinal - periods[i - 1].ordinal) != 1 for i in range(1, len(periods))):
-            return None, {"series": series, "reason": "月份不连续，不能把跨月差当作本月变化"}
+            return None, {**detail, "reason": "月份不连续，不能把跨月差当作本月变化"}
+    if sample["value"].isna().any():
+        return None, {**detail, "reason": "所需月份缺报或同比缺少上年同期值"}
     value = float(last["value"])
     if transform == "change":
         value -= float(sample.iloc[0]["value"])
     elif transform == "mean":
         value = float(sample["value"].mean())
     if not math.isfinite(value):
-        return None, {"series": series, "reason": "指标值无效"}
-    return value, {"series": series, "value": value, "period": str(last["period"]),
-                   "available_at": last["available_at"].isoformat(), "transform": transform}
+        return None, {**detail, "reason": "指标值无效"}
+    return value, {**detail, "value": value, "transform": transform}
 
 
 def evaluate_rule(rule, events, signal):

@@ -312,6 +312,10 @@ def fetch(op, p):
         from .vintages import realtime_events
         d = realtime_events(p["series"], p["start"], p["end"])
         return pack(d, source="alfred")
+    if op == "alfred_public":
+        from .vintages import GRAPH_URL, public_snapshot
+        d = public_snapshot(p["series_ids"], p["vintages"], p["start"], p["end"])
+        return pack(d, source="alfred_public_snapshot", source_url=GRAPH_URL)
     if op == "ts_table":
         # 策略所需的历史财务扩展仍由本地代码请求；认证不进入参数和日志。
         from .fundamentals import paged_query

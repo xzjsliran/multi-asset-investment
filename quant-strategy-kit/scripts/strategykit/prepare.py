@@ -8,7 +8,7 @@ import sys
 
 import pandas as pd
 
-from .config import data_plan, schedule, write_json
+from .config import allocation_frequencies, data_plan, schedule, write_json
 from .selection import quality_value
 
 
@@ -23,6 +23,7 @@ def connect_data_kit(path):
 def prepare(config, data_kit, work, provider="auto", research=None, macro_data=None, cache=None):
     connect_data_kit(data_kit)
     from quantkit.common import DATA_SOURCES, MACRO_SOURCES, Client, frame, normalize_asset, now
+    from quantkit.catalog import FRED
     from quantkit.pipeline import get_calendar, get_macro, get_market, run as download
     from quantkit.fundamentals import stock_features
     from quantkit.research_import import research_calendar, research_prices
@@ -46,7 +47,13 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
     if macro_data:
         source = Path(macro_data)
         imported_macro = pd.read_csv(source / "macro_observations.csv" if source.is_dir() else source)
-    macro_request = {"macro": sorted(set(plan["macro"]) - set(imported_macro.get("series", []))),
+    imported_series = set(imported_macro.get("series", []))
+    if "signal_eligible" in imported_macro:
+        usable = imported_macro["signal_eligible"].astype(str).str.lower().isin(["true", "1", "1.0"])
+        monthly = {key for key in imported_series if FRED.get(key, {}).get("frequency") == "monthly"}
+        # 旧数据只有当前修订版时，继续下载该序列的历史版本。
+        imported_series -= monthly - set(imported_macro.loc[usable, "series"])
+    macro_request = {"macro": sorted(set(plan["macro"]) - imported_series),
                      "provider": provider, **{k: sources[k] for k in MACRO_SOURCES if k in sources}}
     start = (pd.Timestamp(config["start"]) - pd.Timedelta(days=plan["lookback_days"])).strftime("%Y-%m-%d")
     cache = Path(cache).resolve() if cache else work / "cache"
@@ -57,6 +64,12 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
         cal, _ = get_calendar(client, start, config["end"], provider)
         cal = cal.loc[cal["date"].between(pd.Timestamp(start), pd.Timestamp(config["end"]))]
     cal.to_csv(out / "calendar.csv", index=False, encoding="utf-8-sig")
+    macro_dates = set()
+    if macro_request["macro"]:
+        for frequency in allocation_frequencies(config):
+            macro_dates.update(schedule(cal["date"], config["start"], config["end"], frequency).values())
+        macro_dates.add(cal["date"].max())  # 最后一天也用于准备下一次调仓。
+    macro_dates = sorted(macro_dates)
     dates = set()
     for sleeve in config["sleeves"]:
         if sleeve["selection"]["method"] in {"quality_value", "fundamental"}:
@@ -112,7 +125,7 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
                        "assets": domestic, **macro_request, **sources}
             write_json(work / "data-request.json", request)
             # 第一部分会创建自己的目录，因此先写入独立目录再读取合并。
-            domestic_quality = download(work / "data-request.json", work / "domestic", cache)
+            domestic_quality = download(work / "data-request.json", work / "domestic", cache, signal_dates=macro_dates)
             # 标准行情和质量记录一同交给回测前检查。
             shutil.copy2(work / "domestic/quality.json", out / "quality.json")
             prices = pd.read_csv(work / "domestic/prices.csv")
@@ -130,7 +143,7 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
     if domestic_quality:
         acquired = pd.read_csv(work / "domestic/macro_observations.csv")
     elif macro_request["macro"]:
-        acquired, _, macro_failures = get_macro(client, macro_request, start, config["end"])
+        acquired, _, macro_failures = get_macro(client, macro_request, start, config["end"], signal_dates=macro_dates)
     else:
         acquired = pd.DataFrame()
     combined = [piece for piece in (acquired, imported_macro) if not piece.empty]
@@ -142,6 +155,7 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
         "start_with_warmup": start, "end": config["end"], "assets": list(assets.values()), "rows": len(prices),
         "us_alignment": "已完成纽约收盘和已知汇率向后对齐到中国交易日16时；调仓采用该已知报价的低频近似。",
         "macro_failures": macro_failures, "macro_import": str(Path(macro_data).resolve()) if macro_data else None,
+        "macro_signal_dates": [str(day.date()) for day in macro_dates],
         "feature_dates": [str(x.date()) for x in sorted(dates | set(factor_pools))], "requests": client.log,
         **({"equity_factor_coverage":factor_coverage} if factor_coverage is not None else {}),
         "domestic_status": domestic_quality["status"] if domestic_quality else None})

@@ -4,7 +4,6 @@ from __future__ import annotations
 import html
 import importlib.metadata
 from pathlib import Path
-import os
 import shutil
 
 import pandas as pd
@@ -13,6 +12,7 @@ from .common import Client, frame, now, read_request, token_value, write_json, y
 from .cleaning import EVENT_COLUMNS, align_macro, calendar_frame, clean_market, macro_events
 from .catalog import FRED
 from .local_volatility import CN_VOLATILITY
+from .vintages import PUBLIC_SNAPSHOT, monthly_history, signal_vintages
 
 
 def save_csv(df, path):
@@ -103,26 +103,28 @@ def get_market(client, asset, start, end, calendar, provider, sources=None):
     raise ValueError("所有行情来源均不可用：" + str(failures))
 
 
-def get_macro(client, config, start, end):
-    events, failures, status = [], [], []
+def get_macro(client, config, start, end, *, signal_dates=()):
+    events, status = [], []
     requested = config.get("macro", [])
+    monthly_us = [key for key in requested if FRED.get(key, {}).get("frequency") == "monthly"]
+    need_history = bool(monthly_us) and config.get("fred_vintages", True)
+    history, failures = monthly_history(client, monthly_us, start, end, signal_dates) if need_history else ({}, [])
+    requested_versions = set(signal_vintages(signal_dates)) if need_history else set()
     for series in requested:
         if series in {"cn_policy_rate", "cn_unemployment"}:
             continue  # 这两项以有公布日的原公告入库。
-        if series in FRED and FRED[series]["frequency"] == "monthly" and config.get("fred_vintages", True):
-            if os.getenv("FRED_API_KEY", "").strip():
-                try:
-                    result = client.call("fred_realtime", series=series, start=start, end=end)
-                    d = frame(result)
-                    if d.empty:
-                        raise ValueError("ALFRED 没有返回所需版本。")
-                    events.append(d)
-                    status.append({"series": series, "source": "alfred", "rows": len(d),
-                                   "first_period": d["period"].min(), "last_period": d["period"].max(),
-                                   "signal_eligible_rows": len(d)})
-                    continue
-                except Exception as e:
-                    failures.append({"source": "alfred", "series": series, "error": str(e)})
+        if series in history:
+            d = history[series]
+            events.append(d)
+            public = d["source"].eq(PUBLIC_SNAPSHOT).all()
+            row = {"series": series, "source": PUBLIC_SNAPSHOT if public else "alfred_api", "rows": len(d),
+                   "first_period": d["period"].min(), "last_period": d["period"].max(),
+                   "signal_eligible_rows": int(d["value"].notna().sum())}
+            if public:
+                row["versions"] = int(d["vintage"].nunique())
+                row["missing_vintages"] = sorted(requested_versions - set(d["vintage"]))
+            status.append(row)
+            continue
         ops = ["macro"]
         if series in CN_VOLATILITY:
             ops = ["cn_volatility"]
@@ -151,10 +153,13 @@ def get_macro(client, config, start, end):
                 events.append(d)
                 monthly = series in {"cn_pmi", "cn_cpi_yoy"} or (series in FRED and FRED[series]["frequency"] == "monthly")
                 expected_periods = [str(x) for x in pd.period_range(start[:7], end[:7], freq="M")] if monthly else []
-                status.append({"series": series, "source": result["source"], "rows": len(d),
-                               "first_period": d["period"].min(), "last_period": d["period"].max(),
-                               "missing_months": sorted(set(expected_periods) - set(d["period"])),
-                               "signal_eligible_rows": int(d["signal_eligible"].sum())})
+                row = {"series": series, "source": result["source"], "rows": len(d),
+                       "first_period": d["period"].min(), "last_period": d["period"].max(),
+                       "missing_months": sorted(set(expected_periods) - set(d["period"])),
+                       "signal_eligible_rows": int(d["signal_eligible"].sum())}
+                if series in monthly_us and requested_versions:
+                    row["missing_vintages"] = sorted(requested_versions)
+                status.append(row)
                 success = True
                 break
             except Exception as e:
@@ -227,6 +232,8 @@ def make_report(out, quality):
         lines.append(f"- {item['series']}：{item['rows']} 条；" + (f"覆盖 {item['first_period']} 至 {item['last_period']}。" if item['rows'] else "未取得数据。"))
         if item.get("missing_months"):
             lines.append("  缺少月份：" + "、".join(item["missing_months"]) + "；未发布和接口缺项需结合来源核对，未填补。")
+        if item.get("missing_vintages"):
+            lines.append(f"  缺 {len(item['missing_vintages'])} 个所需历史版本，详见 quality.json。")
     lines += ["", "本次可直接继续的工作：", ""] + ["- " + x for x in quality["notes"]]
     lines += ["", "文件入口：", "", "- prices.csv：原始价、复权价、收益与缺失状态。",
               "- asset_mapping.csv：代码、来源代码、证券类型。", "- calendar.csv：日历、周/月/季末和下一交易日。",
@@ -243,7 +250,16 @@ def make_report(out, quality):
     (out / "数据检查报告.html").write_text(page, encoding="utf-8")
 
 
-def run(request_path, out_path, cache_path, refresh=False, timeout=75):
+def monthly_signal_dates(calendar, requested_start):
+    """独立 data fetch 默认准备月末，以及初次建仓前一个交易日。"""
+    days = calendar["date"]
+    before = days.loc[days.lt(pd.Timestamp(requested_start))].tail(1)
+    inside = days.loc[days.ge(pd.Timestamp(requested_start))]
+    last_days = inside.groupby(inside.dt.to_period("M")).max()
+    return sorted(set(before) | set(last_days))
+
+
+def run(request_path, out_path, cache_path, refresh=False, timeout=75, *, signal_dates=None):
     c = read_request(request_path)
     out = Path(out_path).resolve()
     if out.exists() and any(out.iterdir()):
@@ -291,7 +307,9 @@ def run(request_path, out_path, cache_path, refresh=False, timeout=75):
         if not all_prices.empty:
             save_csv(all_prices.loc[~all_prices["quality_status"].eq("ok")], out / "missing_and_invalid.csv")
         print("正在获取宏观数据", flush=True)
-        events, macro_status, failures = get_macro(client, c, first, last)
+        if signal_dates is None:
+            signal_dates = monthly_signal_dates(cal_slice, c["start"])
+        events, macro_status, failures = get_macro(client, c, first, last, signal_dates=signal_dates)
         save_csv(events, out / "macro_observations.csv")
         aligned = align_macro(events, cal_slice)
         save_csv(aligned, out / "macro_asof.csv")
@@ -300,18 +318,21 @@ def run(request_path, out_path, cache_path, refresh=False, timeout=75):
                           all(k in {"before_listing", "after_delisting"} for k in x["issues"]) for x in quality["market"])
         quality["price_research_ready"] = price_ready
         quality["cross_asset_liquidity_ready"] = price_ready and all(x.get("amount_missing_days", 1) == 0 for x in quality["market"])
-        quality["macro_signal_coverage"] = {s: {"eligible_observations": int((events["series"].eq(s) & events["signal_eligible"].eq(True)).sum()),
+        quality["macro_signal_coverage"] = {s: {"eligible_observations": int((events["series"].eq(s) & events["signal_eligible"].eq(True) & events["value"].notna()).sum()),
                                                     "pit_verified_observations": int((events["series"].eq(s) & events["pit_verified"].eq(True)).sum())}
                                             for s in c.get("macro", [])}
-        quality["macro_asof_coverage"] = {s: {"decision_days": len(cal_slice),
+        public_series = {item["series"] for item in macro_status if item.get("source") == PUBLIC_SNAPSHOT}
+        quality["macro_asof_coverage"] = {s: {"decision_days": len(signal_dates) if s in public_series else len(cal_slice),
             "usable_days": int(aligned.loc[aligned["series"].eq(s), "value"].notna().sum())}
             for s in c.get("macro", [])}
-        quality["status"] = "ready_with_notes" if price_ready and all(x["rows"] > 0 for x in macro_status) else "partial"
+        quality["status"] = "ready_with_notes" if price_ready and all(
+            x["rows"] > 0 and not x.get("missing_vintages") for x in macro_status
+        ) else "partial"
         quality["notes"] = [
             "价格研究" + ("可以继续；保留预热期后再计算策略。" if price_ready else "需要先处理缺失或失败的资产。"),
             "成交额、成交量单位不齐的来源可用于价格研究；跨资产流动性筛选需补齐字段或确认单位。",
             "PMI/CPI 当前历史表用于查看；补到统计局原公告的月份才自动进入历史宏观信号。",
-            "美国 CPI、失业率和非农为当前修订历史；可用 fred-vintage 另取指定历史版本，再用于宏观回测。",
+            "美国月度指标优先使用 ALFRED 版本。公开快照仅用于已取数的决策日，普通 FRED 修订历史用于参考。",
             "VIX/美联储利率按纽约次日零点可用的时间滞后假设对齐，未声称取得历史逐次发布版本。",
             "世界银行全球 GDP 是年度修订数据，用作背景比较，不直接作为月度交易信号。",
             "商品 ETF 上市前不补造价格；未知缺失不当作停牌，不做线性插值或反向填充。",
@@ -341,6 +362,7 @@ def run(request_path, out_path, cache_path, refresh=False, timeout=75):
             except importlib.metadata.PackageNotFoundError:
                 versions[package] = "not_installed"
         write_json(out / "manifest.json", {"created_at": now(), "request": c, "versions": versions,
+                   "macro_signal_dates": [str(pd.Timestamp(day).date()) for day in signal_dates] if signal_dates is not None else [],
                    "calls": client.log, "data_in_distribution": False, "credential_saved": False})
         write_json(out / "quality.json", quality)
     return quality

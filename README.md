@@ -45,10 +45,12 @@ Windows 使用 `py -3.11 -m venv .venv` 和 `.venv\Scripts\Activate.ps1`。直�
 
 1.1 的[跨境预设](quant-strategy-kit/references/跨境资产配置说明.md)使用两只场外 QDII 的人民币净值及美元活期存款。中美分别判断宏观状态，资金在大类浮动区间内先归集到共享现金，再从现金安排加仓。黄金是两地均可配置的大类。境内波指、美股 VIX 和风险平价可以按需启用。默认月度调仓，也可切换季度。
 
+1.2 的[美国宏观输入](quant-data-kit/references/美国宏观与利率预期.md)按调仓信号日读取公开 ALFRED 历史版本。CPI 同比和失业率变化使用当时已知的同一版本，缺报月份按策略约定处理。公开取数无需 FRED API 密钥。
+
 ## 开发、适配与发布
 
 四个 kit 和统一入口各保留一份源码；平台差异放在 `adapters/`，安装包分别由 `scripts/build_codex_release.py`、`scripts/build_claude_code_release.py`、`scripts/build_workbuddy_release.py` 和 `scripts/build_dsh_release.py` 生成。当前提供 Codex、Claude Code、WorkBuddy 和 DeepSeek Harness（DSH）适配。
 
-版本号在 `VERSION`。源码、适配说明和构建脚本进入 Git。生成目录与 ZIP 放在本地 `output/`，上传至对应版本的 GitHub Release。维护步骤见[项目维护与发布](docs/项目维护与发布.md)，平台安装方法见上表。`1.1.0` 面向 Codex、WorkBuddy 和 DeepSeek Harness，三份安装包来自同一核心源码。Claude Code 安装包见 `0.3.0` Release。
+版本号在 `VERSION`。源码、适配说明和构建脚本进入 Git。生成目录与 ZIP 放在本地 `output/`，上传至对应版本的 GitHub Release。维护步骤见[项目维护与发布](docs/项目维护与发布.md)，平台安装方法见上表。`1.2.0` 面向 Codex、WorkBuddy 和 DeepSeek Harness，三份安装包来自同一核心源码。Claude Code 安装包见 `0.3.0` Release。
 
 报告使用[投资回测报告规范](quant-report-kit/references/投资回测报告规范.md)；跨模块要求见[AGENTS.md](AGENTS.md)。各模块 references 仅包含投资研究所需说明，客户报告和产品界面采用投资研究表达。

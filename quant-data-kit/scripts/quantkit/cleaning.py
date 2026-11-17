@@ -197,22 +197,32 @@ def align_macro(events, calendar):
     output = []
     if events.empty:
         return pd.DataFrame(columns=["decision_at", "series", "period", "value", "available_at", "stale"])
+    from .vintages import PUBLIC_SNAPSHOT
+
+    cutoff = (calendar["date"] + pd.Timedelta(hours=16)).dt.tz_localize("Asia/Shanghai").dt.tz_convert("UTC")
+    left = pd.DataFrame({"decision_at": cutoff}).sort_values("decision_at")
     for series, data in events.groupby("series"):
         right = data.loc[data["signal_eligible"].eq(True)].copy()
         right["available_at"] = pd.to_datetime(right["available_at"], utc=True, errors="coerce", format="mixed")
         right = right.dropna(subset=["available_at"]).sort_values("available_at")
         if right.empty:
             continue
-        # 公告链接重复可去重；同一发布时点不同值必须检查。
-        if right.groupby("available_at")["value"].nunique().gt(1).any():
-            raise ValueError(series + " 同一发布时间存在冲突值。")
-        right = right.drop_duplicates("available_at")
-        left = pd.DataFrame({"decision_at": (calendar["date"] + pd.Timedelta(hours=16)).dt.tz_localize("Asia/Shanghai").dt.tz_convert("UTC")})
-        out = pd.merge_asof(left.sort_values("decision_at"), right, left_on="decision_at", right_on="available_at", direction="backward")
+        # 一个历史快照可以同时包含多个统计期。仅同一时点、同一统计期的冲突需要报错。
+        if right.groupby(["available_at", "period"])["value"].nunique(dropna=False).gt(1).any():
+            raise ValueError(series + " 同一统计期和可用时点存在冲突值。")
+        right = right.sort_values(["available_at", "period"]).drop_duplicates("available_at", keep="last")
+        # 后来修订的旧月份不会成为最新观测。
+        right = right.loc[right["period"].eq(right["period"].cummax())]
+        out = pd.merge_asof(left, right, left_on="decision_at", right_on="available_at", direction="backward")
         out["series"] = series
         age = (out["decision_at"] - out["available_at"]).dt.total_seconds() / 86400
-        maximum = 62 if series.startswith("cn_") else (10 if series == "vix" else 14)
+        is_monthly = data["period"].astype(str).str.len().eq(7).all()
+        maximum = 62 if is_monthly else (10 if series == "vix" else 14)
         out["stale"] = age.gt(maximum) | age.isna()
+        if "source" in out and out["source"].eq(PUBLIC_SNAPSHOT).any():
+            ny = out["decision_at"].dt.tz_convert("America/New_York").dt.tz_localize(None)
+            expected = (ny.dt.normalize() - pd.Timedelta(days=1)).dt.strftime("%Y-%m-%d")
+            out["stale"] |= out["source"].eq(PUBLIC_SNAPSHOT) & out["vintage"].ne(expected)
         out["value"] = out["value"].where(~out["stale"])
         output.append(out)
     return pd.concat(output, ignore_index=True) if output else pd.DataFrame(columns=["decision_at", "series", "period", "value", "available_at", "stale"])

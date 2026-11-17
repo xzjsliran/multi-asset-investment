@@ -28,7 +28,7 @@ def main():
     e = sub.add_parser("expectations", help="整理从 CME 下载的利率预期表")
     e.add_argument("--input", required=True)
     e.add_argument("--out", required=True)
-    v = sub.add_parser("fred-vintage", help="获取历史版本，需要个人 FRED_API_KEY")
+    v = sub.add_parser("fred-vintage", help="获取历史版本，支持 ALFRED 公开下载")
     for key in ["series", "start", "end", "asof", "out"]:
         v.add_argument("--" + key, required=True)
     args = p.parse_args()

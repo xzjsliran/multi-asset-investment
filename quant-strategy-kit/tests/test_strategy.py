@@ -23,7 +23,7 @@ from strategykit.results import export_results, TABLE_COLUMNS
 from strategykit.presets import PRESET_NAMES, preset
 from quantkit.overseas import align_us
 from quantkit.fundamentals import build_snapshot, prepare_tables
-from quantkit.vintages import snapshot_events
+from quantkit.vintages import PUBLIC_SNAPSHOT, snapshot_events
 
 
 def fixture():
@@ -40,6 +40,22 @@ def fixture():
 
 
 class StrategyRules(unittest.TestCase):
+    def test_alfred_snapshot_keeps_missing_annual_comparison_and_requires_matching_day(self):
+        months = pd.date_range("2025-08-01", "2026-10-01", freq="MS")
+        snapshots = pd.DataFrame({"date": months, "value": range(300, 300+len(months)), "series_id": "CPIAUCSL",
+                                  "vintage_asof": "2026-11-16", "source": PUBLIC_SNAPSHOT})
+        snapshots.loc[snapshots["date"].eq(pd.Timestamp("2025-10-01")), "value"] = np.nan
+        events = snapshot_events(snapshots)
+        events["available_at"] = pd.to_datetime(events["available_at"], utc=True)
+        condition = {"series": "us_cpi_yoy", "transform": "change", "periods": 1}
+        value, detail = observation(events, condition, pd.Timestamp("2026-11-17"))
+        self.assertIsNone(value)
+        self.assertEqual(detail["period"], "2026-10")
+        self.assertIn("上年同期", detail["reason"])
+        value, detail = observation(events, condition, pd.Timestamp("2026-11-18"))
+        self.assertIsNone(value)
+        self.assertIn("对应 ALFRED", detail["reason"])
+
     def test_stamp_schedule_changes_on_execution_date_and_only_for_stocks(self):
         costs = normalize_costs({"stamp_duty_rate": .001, "stamp_duty_schedule": [
             {"from": "2023-08-28", "rate": .0005},
