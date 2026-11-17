@@ -35,11 +35,17 @@ def default_name(config):
     if config.get("allocation", {}).get("method") == "risk_parity":
         return "多资产风险平价策略"
     codes = {a["code"] for s in config.get("sleeves", []) for a in s.get("assets", [])}
+    if config.get("volatility", {}).get("enabled"):
+        return "多资产波动率调整策略"
+    if config.get("macro", {}).get("enabled") and config["macro"].get("regions"):
+        return "地区宏观资产配置策略"
     series = {x.get("series") for r in config.get("macro", {}).get("rules", []) for k in ("all", "any") for x in r.get(k, [])}
     if "vix" in series and config.get("macro", {}).get("enabled"):
         return "VIX动态资产配置策略"
     if {"513100.SH", "513500.SH"} & codes:
         return "多资产配置策略（QDII权益）"
+    if {"050025.OF", "160213.OF"} & codes:
+        return "跨境多资产配置策略"
     if {"QQQ", "SPY"} & codes:
         return "多资产配置策略（海外ETF权益）"
     return "多资产配置策略"
@@ -93,11 +99,13 @@ def cost_text(config):
         legacy = config.get("cost_rate")
         return "未提供" if legacy is None else f"单边佣金 {legacy:.4%}"
     fields = {"commission_rate": "佣金", "slippage_rate": "滑点"}
-    labels = {"stock": "A股", "etf": "境内ETF", "us_etf": "海外ETF"}
+    specific_fields = {**fields, "subscription_rate": "申购费", "redemption_rate": "赎回费"}
+    labels = {"stock": "A股", "etf": "境内ETF", "us_etf": "海外ETF",
+              "qdii_nav": "场外QDII", "usd_deposit": "美元存款"}
     terms = [f"{label} {policy[key]:.4%}" for key, label in fields.items()]
     terms.append(f"A股卖出印花税 {policy['stamp_duty_rate']:.4%}")
     terms.extend(f"{item['from']}起 {item['rate']:.4%}" for item in policy["stamp_duty_schedule"])
-    terms.extend(f"{labels[kind]}{fields[key]} {value:.4%}"
+    terms.extend(f"{labels[kind]}{specific_fields[key]} {value:.4%}"
                  for kind, rates in policy["by_kind"].items() for key, value in rates.items())
     return "，".join(terms)
 

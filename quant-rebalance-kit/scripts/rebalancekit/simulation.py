@@ -25,8 +25,8 @@ def historical_simulation(config, data, data_directory, signal_date, output):
     history["end"] = str(signal.date())
     result = backtest(history, data)
     state = result["final_state"]
-    if state["pending"]:
-        raise ValueError("该历史截面仍有未成交目标，请换一个已完成调仓的截面。")
+    if state["pending"] or state.get("unsettled_redemptions"):
+        raise ValueError("该历史截面仍有未成交目标或待到账回款，请选一个已结算的截面。")
     asof = (signal+pd.Timedelta(hours=16)).tz_localize("Asia/Shanghai").isoformat()
     # 仅为流程验证使用分数单位；实际交易单位必须由产品规则输入。
     raw = pd.read_csv(Path(data_directory)/"prices.csv", dtype={"code": str})

@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 from strategykit.config import ROOT, data_plan, read_config, write_json
-from strategykit.presets import CATALOG, PRESET_NAMES, preset
+from strategykit.presets import CATALOG, PRESET_ALIASES, PRESET_NAMES, preset
 
 
 def main():
@@ -14,7 +14,8 @@ def main():
     commands.add_parser("catalog")
     commands.add_parser("doctor")
     q = commands.add_parser("init")
-    q.add_argument("--preset", choices=PRESET_NAMES, default="cross-border-allocation")
+    q.add_argument("--preset", type=lambda name: PRESET_ALIASES.get(name, name),
+                   choices=PRESET_NAMES, default="cross-border-allocation")
     q.add_argument("--out", required=True)
     q = commands.add_parser("plan")
     q.add_argument("--config", required=True)

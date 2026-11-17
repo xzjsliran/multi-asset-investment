@@ -61,7 +61,7 @@ def proxy_returns(settings, prices, signal):
 
 def allocate_risk(config, prices, signal, previous):
     settings = config["allocation"]
-    ids = [s["id"] for s in config["sleeves"]]
+    ids = list(settings["proxies"])
     base = {s["id"]: s["weight"] for s in config["sleeves"]}
     info = {"state": "大类资产风险平价", "method": "risk_parity", "inputs": [], "missing": False,
             "estimation": "signal_date_proxy_baskets", "proxies": settings["proxies"],
@@ -91,7 +91,7 @@ def allocate_risk(config, prices, signal, previous):
         info["risk_rows"] = [{"sleeve": sid, "target_weight": float(w[i]),
                              "risk_share": info["risk_shares"][i],
                              "volatility_contribution": info["volatility_contributions"][i]} for i, sid in enumerate(ids)]
-        return dict(zip(ids, map(float, w))), info
+        return {**base, **dict(zip(ids, map(float, w)))}, info
     except ValueError as exc:
         fallback = settings["fallback"]
         if fallback == "error":

@@ -41,7 +41,7 @@ def daily_exposure(run, selected, weights):
     for sleeve in sleeves:
         selection = sleeve.get("selection", {}).get("method")
         name = sleeve.get("name", "")
-        if (sleeve["id"] in {"equity", "stock", "stocks"} or "股票" in name or "权益" in name
+        if (sleeve["id"] in {"equity", "stock", "stocks", "overseas_broad", "overseas_growth"} or "股票" in name or "权益" in name
                 or selection in {"quality_value", "fundamental"}):
             equity_sleeves.add(sleeve["id"])
         securities.update({asset["code"]: asset for asset in sleeve.get("assets", [])})
@@ -49,7 +49,7 @@ def daily_exposure(run, selected, weights):
     if not weights.empty and (equity_sleeves or direct_stocks):
         days = selected["date"]
         # 资产部分中的现金单独列示，未分配的交易日补零权重。
-        rows = weights.loc[weights["code"].ne("CASH")
+        rows = weights.loc[~weights["code"].isin(["CASH", "RECEIVABLE"])
                            & (weights["sleeve"].isin(equity_sleeves) | weights["code"].isin(direct_stocks))]
         weights_by_day = rows.groupby("date")["weight"].sum()
         exposure["equity"] = float(weights_by_day.reindex(days, fill_value=0.).mean())

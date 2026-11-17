@@ -12,6 +12,9 @@ import time
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
+MACRO_SOURCES = {"nbs_urls", "nbs_crawl_pages", "nbs_saved_pages", "pbc_urls", "pbc_saved_pages",
+                 "fred_vintages", "hcvix_saved_page"}
+DATA_SOURCES = MACRO_SOURCES | {"usd_deposit_rates"}
 
 
 def now() -> str:
@@ -33,6 +36,10 @@ def normalize_asset(asset):
     import re
     a = dict(asset)
     code = str(a.get("code", "")).strip().upper()
+    if a.get("kind") == "qdii_nav" and re.fullmatch(r"\d{6}\.OF", code):
+        return {**a, "code": code, "ts_code": code, "currency": "CNY", "timezone": "Asia/Shanghai"}
+    if a.get("kind") == "usd_deposit" and code == "USD_DEPOSIT":
+        return {**a, "code": code, "currency": "CNY", "native_currency": "USD", "timezone": "Asia/Shanghai"}
     if not re.fullmatch(r"\d{6}\.(SH|SZ)", code):
         raise ValueError("代码请写成 510300.SH 或 000001.SZ，并明确 etf / stock；不要只填名称。")
     if a.get("kind") not in {"etf", "stock"}:
@@ -58,7 +65,7 @@ def normalize_asset(asset):
 
 def read_request(path):
     c = json.loads(Path(path).read_text(encoding="utf-8"))
-    allowed_keys = {"start", "end", "lookback_days", "provider", "assets", "macro", "nbs_urls", "nbs_crawl_pages", "nbs_saved_pages"}
+    allowed_keys = {"start", "end", "lookback_days", "provider", "assets", "macro"} | DATA_SOURCES
     if set(c) - allowed_keys:
         raise ValueError("配置中存在未识别字段；凭证应留在本地环境或 SDK 配置中。")
     start, end = pd.Timestamp(c["start"]), pd.Timestamp(c["end"])
@@ -77,7 +84,8 @@ def read_request(path):
     if not c["assets"] or len({a["code"] for a in c["assets"]}) != len(c["assets"]):
         raise ValueError("资产不能为空或重复。")
     from .catalog import FRED
-    allowed = {"cn_pmi", "cn_cpi_yoy", "vix", "world_gdp_growth", *FRED}
+    from .local_volatility import CN_VOLATILITY
+    allowed = {"cn_pmi", "cn_cpi_yoy", "cn_unemployment", "cn_policy_rate", "vix", "world_gdp_growth", *CN_VOLATILITY, *FRED}
     if set(c.get("macro", [])) - allowed:
         raise ValueError("未知宏观指标；先查看 references/数据接口与口径.md。")
     if len(c.get("macro", [])) != len(set(c.get("macro", []))):

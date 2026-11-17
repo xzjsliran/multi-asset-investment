@@ -8,18 +8,29 @@ import requests
 
 
 def fred_vintage(series_id, start, end, asof):
-    key = os.getenv("FRED_API_KEY", "").strip()
-    if not key:
-        raise ValueError("此选项需要个人 FRED_API_KEY；普通 FRED 下载无需 Key。")
     if not re.fullmatch(r"[A-Z0-9]+", series_id):
         raise ValueError("请使用 FRED 原始序列代码，例如 PAYEMS。")
     if pd.Timestamp(start) > pd.Timestamp(end) or pd.Timestamp(asof) > pd.Timestamp.now().normalize():
         raise ValueError("检查观察区间和历史版本日期。")
+    d = alfred_observations(series_id, start, end, asof, asof)
+    d["value"] = pd.to_numeric(d["value"], errors="coerce")
+    d["series_id"] = series_id
+    d["vintage_asof"] = asof
+    # 版本日期只有日，没有可核验的逐笔发布时间。
+    d["available_at"] = (pd.Timestamp(asof)+pd.Timedelta(days=1)).tz_localize("America/New_York").isoformat()
+    d["availability_rule"] = "snapshot_next_new_york_midnight"
+    return d
+
+
+def alfred_observations(series_id, start, end, first_version, last_version):
+    key = os.getenv("FRED_API_KEY", "").strip()
+    if not key:
+        raise ValueError("历史版本需要个人 FRED_API_KEY，也可导入已有快照。")
     url = "https://api.stlouisfed.org/fred/series/observations"
     try:
         r = requests.get(url, params={"api_key": key, "file_type": "json", "series_id": series_id,
                 "observation_start": start, "observation_end": end,
-                "realtime_start": asof, "realtime_end": asof, "limit": 100000}, timeout=(8, 30))
+                "realtime_start": first_version, "realtime_end": last_version, "limit": 100000}, timeout=(8, 30))
         r.raise_for_status()
         body = r.json()
         if int(body.get("count", 0)) > len(body.get("observations", [])):
@@ -29,13 +40,23 @@ def fred_vintage(series_id, start, end, asof):
     d = pd.DataFrame(body.get("observations", []))
     if d.empty:
         raise ValueError("指定日期下没有可用观测。")
-    d["value"] = pd.to_numeric(d["value"], errors="coerce")
-    d["series_id"] = series_id
-    d["vintage_asof"] = asof
-    # 这是“该日版本快照”，不能将其当作每条数值最初的发布时间。
-    d["available_at"] = (pd.Timestamp(asof)+pd.Timedelta(days=1)).tz_localize("America/New_York").isoformat()
-    d["availability_rule"] = "snapshot_next_new_york_midnight"
     return d
+
+
+def realtime_events(series, start, end):
+    """一次取得版本生效区间，在每次发布或修订日重建当时的完整月度截面。"""
+    from .catalog import FRED
+    spec = FRED[series]
+    if spec["frequency"] != "monthly":
+        raise ValueError("ALFRED 批量版本用于月度指标。")
+    observation_start = (pd.Timestamp(start) - pd.DateOffset(months=13)).strftime("%Y-%m-%d")
+    history = alfred_observations(spec["id"], observation_start, end, start, end)
+    versions = []
+    for day in sorted(history["realtime_start"].unique()):
+        view = history.loc[history["realtime_start"].le(day) & history["realtime_end"].ge(day), ["date", "value"]]
+        versions.append(view.assign(series_id=spec["id"], vintage_asof=day))
+    events = snapshot_events(pd.concat(versions, ignore_index=True))
+    return events.loc[events["series"].eq(series)].copy()
 
 
 def save_vintage(series_id, start, end, asof, out):

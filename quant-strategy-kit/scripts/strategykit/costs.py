@@ -3,8 +3,10 @@ from datetime import date
 import math
 
 
-ASSET_KINDS = {"stock", "etf", "us_etf"}
+ASSET_KINDS = {"stock", "etf", "us_etf", "qdii_nav", "usd_deposit"}
 BUY_RATES = ("commission_rate", "slippage_rate")
+FUND_RATES = ("subscription_rate", "redemption_rate")
+NO_BROKER_FEE = {"qdii_nav", "usd_deposit"}
 COST_FIELDS = ("commission", "slippage", "stamp_duty")
 
 
@@ -21,10 +23,11 @@ def normalize_costs(value):
     costs = {key: rate(value.get(key, 0), key) for key in (*BUY_RATES, "stamp_duty_rate")}
     overrides = value.get("by_kind", {})
     if not isinstance(overrides, dict) or set(overrides) - ASSET_KINDS:
-        raise ValueError("by_kind 仅支持 stock、etf、us_etf。")
+        raise ValueError("by_kind 含未支持的品种。")
     for kind, rates in overrides.items():
-        if not isinstance(rates, dict) or set(rates) - set(BUY_RATES):
-            raise ValueError(f"{kind} 的费用覆盖仅支持 commission_rate 和 slippage_rate。")
+        allowed = set(FUND_RATES if kind == "qdii_nav" else (("slippage_rate",) if kind == "usd_deposit" else BUY_RATES))
+        if not isinstance(rates, dict) or set(rates) - allowed:
+            raise ValueError(f"{kind} 的费用支持 " + "、".join(sorted(allowed)) + "。")
     costs["by_kind"] = {kind: {key: rate(rates[key], key) for key in rates}
                         for kind, rates in overrides.items()}
     schedule = value.get("stamp_duty_schedule", [])
@@ -42,7 +45,7 @@ def normalize_costs(value):
     max_stamp = max(costs["stamp_duty_rate"], *dates.values(), 0)
     for kind in ASSET_KINDS:
         effective = {**costs, **costs["by_kind"].get(kind, {})}
-        if sum(effective[key] for key in BUY_RATES) + (max_stamp if kind == "stock" else 0) >= 1:
+        if kind not in NO_BROKER_FEE and sum(effective[key] for key in BUY_RATES) + (max_stamp if kind == "stock" else 0) >= 1:
             raise ValueError("单边合计费率须小于100%，以保留可用的卖出回款。")
     return costs
 
@@ -75,9 +78,11 @@ def trade_cost(costs, amount, kind, day):
     if amount and kind is None and (costs["by_kind"] or (amount < 0 and stamp_rate)):
         raise ValueError("分品种费用需要确认证券类型（stock、etf 或 us_etf）。")
     rates = costs["by_kind"].get(kind, {})
+    commission = rates.get("redemption_rate" if amount < 0 else "subscription_rate", 0.) if kind == "qdii_nav" else (
+        rates.get("commission_rate", 0. if kind == "usd_deposit" else costs["commission_rate"]))
     return {
-        "commission": abs(amount) * rates.get("commission_rate", costs["commission_rate"]),
-        "slippage": abs(amount) * rates.get("slippage_rate", costs["slippage_rate"]),
+        "commission": abs(amount) * commission,
+        "slippage": abs(amount) * rates.get("slippage_rate", 0. if kind in NO_BROKER_FEE else costs["slippage_rate"]),
         "stamp_duty": abs(amount) * stamp_rate if amount < 0 and kind == "stock" else 0.,
     }
 

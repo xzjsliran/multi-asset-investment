@@ -45,6 +45,23 @@ def fixture():
 
 
 class RebalanceRules(unittest.TestCase):
+    def test_fund_proceeds_do_not_fund_same_day_orders(self):
+        c, d, a, r, q = fixture()
+        c["sleeves"][0]["assets"][0].update(kind="qdii_nav", redemption_days=10)
+        c["transaction_costs"] = {"by_kind": {"qdii_nav": {"redemption_rate": .002}}}
+        plan = make_plan(c, d, a, r, q)
+        self.assertEqual([row["side"] for row in plan["orders"]], ["sell"])
+        self.assertEqual(plan["orders"][0]["settlement_sessions"], 10)
+        self.assertAlmostEqual(plan["account"]["unsettled_redemptions_cny"], 299.4)
+        self.assertAlmostEqual(plan["account"]["cash_after_cny"], 0.)
+        self.assertEqual(validate_plan(plan)["cash_conservation"], "passed")
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            export_plan(plan, validate(c), target / "plan")
+            export_rebalance(target / "plan", target / "report")
+            validate_artifact(target / "report")
+            self.assertIn("待到账赎回款", (target / "report/报告.html").read_text())
+
     def test_fee_confirmation_changes_without_resetting_legacy_account_state(self):
         c, d, a, r, q = fixture()
         a["strategy_state"] = {"strategy_digest": digest(c)}

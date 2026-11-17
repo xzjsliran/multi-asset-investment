@@ -118,6 +118,7 @@ EVENT_COLUMNS = ["series", "period", "value", "unit", "release_at", "available_a
 
 
 def macro_events(series, raw, meta, start, end):
+    from .local_volatility import CN_VOLATILITY
     rows = []
     if series in FRED and FRED[series].get("transform"):
         raw = raw.copy()
@@ -149,6 +150,13 @@ def macro_events(series, raw, meta, start, end):
             unit = "index" if series == "cn_pmi" else "percent_yoy"
             if not pd.Timestamp(start).to_period("M") <= pd.Period(period) <= pd.Timestamp(end).to_period("M"):
                 continue
+        elif series in CN_VOLATILITY:
+            period, value, unit = r["Date"], r[series], "index_points"
+            if not start <= period <= end:
+                continue
+            stamp = pd.Timestamp(period)
+            available = (stamp + pd.Timedelta(days=1)).tz_localize("Asia/Shanghai").isoformat()
+            rule, vintage, eligible = "next_china_midnight_assumption", "downloaded_daily_history", True
         elif series in FRED or series == "vix":
             field = "observation_date" if "observation_date" in r else "DATE"
             stamp = pd.Timestamp(r[field]).normalize()

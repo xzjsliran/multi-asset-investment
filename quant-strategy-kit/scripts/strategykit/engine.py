@@ -7,7 +7,7 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 
-from .config import schedule, validate
+from .config import allocation_frequencies, schedule, validate
 from .costs import COST_FIELDS, asset_kinds, charges_fees, costs_for, trade_cost
 from .decision import decide
 from .positions import internal_transfers, market_changes, position_changes
@@ -32,14 +32,17 @@ def backtest(config, data):
     execution_marks = data.open_prices.combine_first(marked.shift(1)) if at_open else marked
     last_seen = prices.notna().apply(lambda x: pd.Series(np.where(x, np.arange(len(x)), np.nan), index=x.index)).ffill()
     schedules = {sid: schedule(data.calendar, config["start"], config["end"], s["rebalance"]) for sid, s in sleeves.items()}
-    outer = schedule(data.calendar, config["start"], config["end"], config["allocation_rebalance"])
-    macro = config.get("macro", {})
-    if macro.get("enabled"):
-        outer.update(schedule(data.calendar, config["start"], config["end"], macro.get("rebalance", "monthly")))
+    outer = {day: signal for f in allocation_frequencies(config)
+             for day, signal in schedule(data.calendar, config["start"], config["end"], f).items()}
     days = data.calendar[(data.calendar >= pd.Timestamp(config["start"])) & (data.calendar <= pd.Timestamp(config["end"]))]
-    pending = {}
+    pending, shared_pending = {}, set()
+    redemption_days = {a["code"]: a["redemption_days"] for s in sleeves.values()
+                       for a in s.get("assets", []) if a["kind"] == "qdii_nav"}
+    receivables = dict.fromkeys(ids, 0.)
+    payments = defaultdict(list)
+    shared_cash_target = 0.
     inner = {}
-    previous_alloc = {sid: s["weight"] for sid, s in sleeves.items()}
+    previous_alloc = {}
     previous_nav = capital
     previous_values = {sid: 0. for sid in ids}
     previous_values["cash"] = capital
@@ -79,10 +82,17 @@ def backtest(config, data):
             fee = sum(fees.values())
             books[sid]["units"][code] = books[sid]["units"].get(code, 0.) + delta / px[code]
             books[sid]["cash"] -= delta + fee
+            lag = redemption_days.get(code, 0) if delta < 0 and not internal else 0
+            if lag:
+                owner = "cash" if transfer else sid
+                net = -delta - fee
+                books[sid]["cash"] -= net
+                receivables[owner] += net
+                payments[data.calendar.get_loc(day) + lag].append((owner, net))
             changes[sid][code] -= delta
             trades.append({"date": day, "signal_date": signals[sid], "sleeve": sid, "code": code,
                            "amount": delta, "side": "buy" if delta > 0 else "sell", "cost": fee,
-                           "internal_transfer": internal, **fees})
+                           "internal_transfer": internal, "settlement_sessions": lag, **fees})
 
         if len(group) > 1:
             eligible = {sid: {code: delta for code, delta in changes[sid].items()
@@ -98,7 +108,7 @@ def backtest(config, data):
                     eligible[buyer][code] -= amount
                 for sid, deltas in market_changes(eligible).items():
                     for code, delta in deltas.items():
-                        if delta < -1e-7:
+                        if delta < -1e-7 and code not in redemption_days:
                             balance[sid] -= delta + sum(trade_cost(costs, delta, kinds.get(code), cost_day).values())
                 if any(balance[sid] < desired[sid].get("__cash__", 0.) - 1e-8 for sid in group):
                     moves = []
@@ -168,16 +178,25 @@ def backtest(config, data):
                     execute(sid, code, delta, {key: value * ratio for key, value in buy_costs[code].items()})
             remaining = {code: delta for code, delta in changes[sid].items() if abs(delta) > .01}
             # 费用导致的目标偏差当期接受。只重试交易障碍留下的差额。
-            if remaining and (sid in blocked_sleeves or (transfer and blocked_sells)):
+            waiting_shared = (transfer or sid in shared_pending) and receivables["cash"] > 1e-7
+            waiting_funds = any(delta > 0 for delta in remaining.values()) and (
+                waiting_shared or receivables[sid] > 1e-7)
+            if remaining and (sid in blocked_sleeves or (transfer and blocked_sells) or waiting_funds):
                 pending[sid] = (dict(desired[sid]), signals[sid], remaining)
+                if transfer:
+                    shared_pending.add(sid)
             else:
                 pending.pop(sid, None)
+                shared_pending.discard(sid)
 
     for day in days:
         first_trade = len(trades)
         close_px = marked.loc[day]
         px = execution_marks.loc[day]
         index = prices.index.get_loc(day)
+        for sid, amount in payments.pop(index, []):
+            books[sid]["cash"] += amount
+            receivables[sid] -= amount
         for sid in ids:
             for code, units in books[sid]["units"].items():
                 if units > 1e-10 and index - last_seen.loc[day, code] > config.get("max_valuation_gap", 10):
@@ -186,7 +205,7 @@ def backtest(config, data):
                     valuation_gaps.append({"date": day, "sleeve": sid, "code": code,
                                            "missing_sessions": int(index-last_seen.loc[day, code]),
                                            "mark_price": float(px[code]), "action": "carry_last_known_for_valuation_only"})
-        pre = {sid: sum(values(sid, px).values()) + books[sid]["cash"] for sid in ids}
+        pre = {sid: sum(values(sid, px).values()) + books[sid]["cash"] + receivables[sid] for sid in ids}
         nav = sum(pre.values())
         # 执行价以前的盈亏归前一天持仓。
         pnl = {sid: pre[sid] - previous_values[sid] for sid in ids}
@@ -203,7 +222,7 @@ def backtest(config, data):
             opening_codes = data.open_prices.loc[day].dropna().index if at_open else None
             decision = decide(config, data, day, signal,
                               {sid: values(sid, px) for sid in ids},
-                              {sid: books[sid]["cash"] for sid in ids},
+                              {sid: books[sid]["cash"] + receivables[sid] for sid in ids},
                               inner, previous_alloc, new_ids, is_outer, opening_codes)
             inner, previous_alloc = decision["inner"], decision["allocation"]
             audits.extend(decision["optimization"])
@@ -211,18 +230,32 @@ def backtest(config, data):
             if decision["regime"] is not None:
                 regimes.append(decision["regime"])
             desired, group = decision["desired"], decision["group"]
+            if is_outer:
+                shared_cash_target = desired["cash"]["__cash__"]
+                shared_pending.clear()
+            else:
+                shared_pending.difference_update(new_ids)
             signals = dict.fromkeys(group, signal)
             for sid in group:
                 for code, amount in desired[sid].items():
                     targets.append({"execution_date": day, "signal_date": signal, "sleeve": sid, "code": code,
                                     "target_value": amount, "portfolio_weight": amount / nav})
         # 同日处理新差额与旧委托的剩余部分。持仓在回测截止日照常估值。
+        retry = {}
         for sid, (target, signal, remaining) in pending.items():
             if sid not in desired:
-                desired[sid], signals[sid], outstanding[sid] = target, signal, remaining
+                if not is_outer and sid in shared_pending:
+                    retry[sid] = (target, signal, remaining)
+                else:
+                    desired[sid], signals[sid], outstanding[sid] = target, signal, remaining
         if desired:
             rebalance_group(desired, px, day, signals, is_outer, outstanding)
-        post = {sid: sum(values(sid, px).values()) + books[sid]["cash"] for sid in ids}
+        if retry:
+            retry_targets = {sid: target for sid, (target, _, _) in retry.items()}
+            retry_targets["cash"] = {"__cash__": shared_cash_target}
+            rebalance_group(retry_targets, px, day, {sid: sig for sid, (_, sig, _) in retry.items()},
+                            True, {sid: left for sid, (_, _, left) in retry.items()})
+        post = {sid: sum(values(sid, px).values()) + books[sid]["cash"] + receivables[sid] for sid in ids}
         day_costs = dict.fromkeys(COST_FIELDS, 0.)
         market_amount = 0.
         for fill in trades[first_trade:]:
@@ -237,7 +270,7 @@ def backtest(config, data):
         turnover = market_amount / nav
         if at_open:
             # 开盘成交后到收盘的涨跌记录在更新后的持仓上。
-            settled = {sid: sum(values(sid, close_px).values()) + books[sid]["cash"] for sid in ids}
+            settled = {sid: sum(values(sid, close_px).values()) + books[sid]["cash"] + receivables[sid] for sid in ids}
             for sid in ids:
                 pnl[sid] += settled[sid] - post[sid]
             post = settled
@@ -251,12 +284,14 @@ def backtest(config, data):
                 books[sid]["units"][code] = max(0., units)
         histories.append({"date": day, "nav": nav / capital, "equity": nav,
                           "return": nav / previous_nav - 1, "cash_weight": sum(books[sid]["cash"] for sid in ids) / nav,
+                          "unsettled_redemptions_cny": sum(receivables.values()),
                           "transaction_cost": cost, "turnover": turnover, **day_costs,
                           # 轻量的日线记录也提供各部分的非现金仓位，供配套对照使用。
-                          **{f"invested_weight_{sid}": (post[sid] - books[sid]["cash"]) / nav for sid in sleeves},
+                          **{f"invested_weight_{sid}": (post[sid] - books[sid]["cash"] - receivables[sid]) / nav for sid in sleeves},
                           **{f"pnl_{sid}": pnl[sid] for sid in ids}})
         for sid in ids:
-            for code, amount in {**values(sid, close_px), "CASH": books[sid]["cash"]}.items():
+            for code, amount in {**values(sid, close_px), "CASH": books[sid]["cash"],
+                                 "RECEIVABLE": receivables[sid]}.items():
                 if amount > 1e-6:
                     weight_rows.append({"date": day, "sleeve": sid, "code": code, "value": amount, "weight": amount / nav})
         previous_values, previous_nav, previous_px = post, nav, close_px
@@ -273,5 +308,6 @@ def backtest(config, data):
             "unfilled_at_end": sorted(pending), "initial_capital": capital,
             "final_state": {"as_of": str(days[-1].date()), "units_basis": "adjusted_simulation",
                             "books": copy.deepcopy(books), "inner": inner, "previous_allocation": previous_alloc,
+                            "unsettled_redemptions": {sid: amount for sid, amount in receivables.items() if amount > 1e-7},
                             "pending": {sid: {"targets": target, "signal_date": str(sig.date()), "remaining": remaining}
                                         for sid, (target, sig, remaining) in pending.items()}}}

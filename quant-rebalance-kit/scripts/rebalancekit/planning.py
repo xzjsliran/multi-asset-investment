@@ -101,7 +101,9 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
         total = sum(current[sid].values()) + current_cash[sid]
         if total > 1e-8 and sid not in inner:
             inner[sid] = {code: v/total for code, v in current[sid].items()}
-    previous = state.get("previous_allocation", {s["id"]: s["weight"] for s in c["sleeves"]})
+    previous = state.get("previous_allocation", {})
+    if not previous and c["macro"].get("enabled") and c["macro"].get("regions") and not r["initial_allocation"]:
+        previous = {sid: (sum(current[sid].values()) + current_cash[sid]) / equity for sid in ids[:-1]}
     decision = decide(c, data, event["execution_date"], event["signal_date"], current, current_cash,
                       inner, previous, event["new_ids"], event["is_outer"])
     target = {sid: {**current[sid], "__cash__": current_cash[sid]} for sid in ids}
@@ -127,6 +129,9 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
         liquid[bucket(sid, cur)] += value
     projected = copy.deepcopy(positions)
     legs, buy_requests, issues = [], [], []
+    receivables = []
+    redemption_days = {a["code"]: a["redemption_days"] for s in c["sleeves"]
+                       for a in s.get("assets", []) if a["kind"] == "qdii_nav"}
     sell_quantities = defaultdict(float)
     for (sid, code), held in positions.items():
         if held["quantity"] > 0 and quotes[code]["age_days"] > r["max_quote_age_days"]:
@@ -140,10 +145,18 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
         projected[key]["quantity"] += delta
         if delta < 0:
             projected[key]["available_quantity"] += delta
-        liquid[bucket(sid, q["currency"])] -= delta * q["price"]
+        delayed = delta < 0 and not internal and code in redemption_days
+        if delayed:
+            amount = -delta * q["price"] - total_fee(code, delta)
+            receivables.append({"sleeve": sid, "code": code, "amount_cny": amount * rates[q["currency"]],
+                                "sessions": redemption_days[code]})
+            issues.append({"sleeve": sid, "code": code, "reason": "预计申赎回款待确认到账，暂不可用于买入"})
+        else:
+            liquid[bucket(sid, q["currency"])] -= delta * q["price"]
         if delta < 0 and not internal:
             sell_quantities[code] -= delta
-            liquid[bucket(sid, q["currency"])] -= total_fee(code, delta)
+            if not delayed:
+                liquid[bucket(sid, q["currency"])] -= total_fee(code, delta)
         legs.append({"sleeve": sid, "code": code, "signed_quantity": delta,
                      "amount_native": delta*q["price"], "amount_cny": delta*q["price_cny"], "currency": q["currency"]})
     quantities = {sid: {} for sid in decision["group"]}
@@ -178,7 +191,7 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
             moved_out[seller, code] += quantity
         for sid, changes in market_changes(remaining).items():
             for code, delta in changes.items():
-                if delta < 0 and code in market_codes:
+                if delta < 0 and code in market_codes and code not in redemption_days:
                     q = quotes[code]
                     available = positions[sid, code]["available_quantity"] - moved_out[sid, code]
                     sell = floor_lot(min(-delta, available), q["sell_lot"])
@@ -277,6 +290,7 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
             cost_totals[field] += breakdown[field] * rates[q["currency"]]
         orders.append({"code": code, "name": q.get("name", code), "side": "buy" if delta > 0 else "sell",
                        "quantity": abs(delta), "signed_quantity": delta, "reference_price": q["price"],
+                       "settlement_sessions": redemption_days.get(code, 0) if delta < 0 else 0,
                        "price_available_at": q["available_at"], "currency": q["currency"],
                        "amount_native": abs(delta)*q["price"], "amount_cny": abs(delta)*q["price_cny"],
                        "estimated_cash_change_native": -delta*q["price"] - native_cost,
@@ -288,7 +302,8 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
     if cash_after < r["cash_buffer_cny"]-.01:
         issues.append({"sleeve": "cash", "code": "CASH", "reason": "按当前策略目标产生的卖出回款不足以满足额外保留现金要求，需要调整约束或目标配置"})
     stock_after = sum(p["quantity"]*quotes[code]["price_cny"] for (_, code), p in projected.items())
-    estimated_equity = stock_after + cash_after
+    receivable_after = sum(row["amount_cny"] for row in receivables)
+    estimated_equity = stock_after + cash_after + receivable_after
     total_cost = sum(cost_totals.values())
     error = estimated_equity + total_cost - equity
     if abs(error) > max(1., equity)*1e-9:
@@ -332,14 +347,14 @@ def make_plan(config, data, account, request, quote_document, confirmation=None)
                    "requires_signal_refresh": event["preliminary"]},
         "event": {"is_outer": event["is_outer"], "selection_sleeves": event["new_ids"], "participating_sleeves": decision["group"]},
         "account": {"equity_cny": equity, "cash_before_cny": sum(current_cash.values()), "cash_after_cny": cash_after,
-                    "projected_equity_cny": estimated_equity},
+                    "projected_equity_cny": estimated_equity, "unsettled_redemptions_cny": receivable_after},
         "transaction_costs": {"policy": costs, "estimated_total_cny": total_cost,
                               **{f"{field}_cny": cost_totals[field] for field in COST_FIELDS}},
         "targets": target_rows, "holdings": holding_rows, "orders": orders, "allocation_legs": legs,
         "cash_before": a["cash"], "cash_after": post_cash, "quotes": list(quotes.values()), "fx": rates, "fx_available_at": fx_times,
         "regime": decision["regime"], "optimization": decision["optimization"],
         "selections": [row for chosen in decision["selections"] for row in json.loads(chosen.to_json(orient="records", date_format="iso"))],
-        "issues": issues, "funding_gaps": funding_gaps, "next_events": next_dates,
+        "issues": issues, "funding_gaps": funding_gaps, "unsettled_redemptions": receivables, "next_events": next_dates,
         "checks": {"position_policy": "long_only", "negative_positions": 0, "negative_cash": 0,
                    "fund_conservation_error_cny": error, "target_weight_sum": sum(x["target_weight"] for x in target_rows),
                    "orders_netted_by_security": True, "transaction_cost_cny": total_cost, "raw_prices_for_quantities": True},

@@ -5,10 +5,9 @@ import copy
 import math
 import pandas as pd
 
-from .config import FREQUENCIES
-from .regime import allocation
+from .allocation import target_allocation
+from .config import FREQUENCIES, allocation_frequencies
 from .selection import select_and_weight
-from .risk import allocate_risk
 
 
 def nonnegative(values, label, maximum=None):
@@ -28,9 +27,7 @@ def event_on(config, calendar, execution_date, initial=False):
     signal = dates[dates.get_loc(day) - 1]
     def due(frequency):
         return initial or day.to_period(FREQUENCIES[frequency]) != signal.to_period(FREQUENCIES[frequency])
-    outer = due(config["allocation_rebalance"])
-    if config.get("macro", {}).get("enabled"):
-        outer |= due(config["macro"].get("rebalance", "monthly"))
+    outer = any(due(frequency) for frequency in allocation_frequencies(config))
     return {"execution_date": day, "signal_date": signal, "is_outer": outer,
             "new_ids": [s["id"] for s in config["sleeves"] if due(s["rebalance"])]}
 
@@ -72,10 +69,7 @@ def decide(config, data, execution_date, signal_date, current_values, sleeve_cas
     desired, regime = {}, None
     alloc = dict(previous_alloc)
     if is_outer:
-        if config.get("allocation", {}).get("method") == "risk_parity":
-            alloc, info = allocate_risk(config, data.prices, signal, previous_alloc)
-        else:
-            alloc, info = allocation(config, data.macro, signal, previous_alloc)
+        alloc, info = target_allocation(config, data, signal, previous_alloc)
         nonnegative(alloc.values(), "大类权重", 1.)
         if set(alloc) != set(sleeves):
             raise ValueError("大类权重必须包含全部资产部分。")

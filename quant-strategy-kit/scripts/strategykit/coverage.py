@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .config import all_assets, schedule
+from .allocation import target_allocation
+from .config import all_assets, allocation_frequencies, schedule
 from .data import benchmark_start
 from .equity_selection import DEFAULT_POOL, FIELDS, METHOD, pool_snapshot
 from .risk import proxy_returns
-from .regime import allocation
 from .selection import active_assets
 
 
@@ -154,15 +154,15 @@ def check_fundamentals(config, data, blockers):
 
 def check_macro(config, data, warnings):
     macro = config["macro"]
-    if not macro["enabled"]:
+    if not macro["enabled"] and not config.get("volatility", {}).get("enabled"):
         return
-    events = schedule(data.calendar, config["start"], config["end"], config["allocation_rebalance"])
-    events.update(schedule(data.calendar, config["start"], config["end"], macro.get("rebalance", "monthly")))
-    previous = {sleeve["id"]: sleeve["weight"] for sleeve in config["sleeves"]}
+    events = {day: signal for f in allocation_frequencies(config)
+              for day, signal in schedule(data.calendar, config["start"], config["end"], f).items()}
+    previous = {}
     missing = []
     for execution, signal in sorted(events.items()):
-        previous, decision = allocation(config, data.macro, signal, previous)
-        if decision.get("fallback"):
+        previous, decision = target_allocation(config, data, signal, previous)
+        if decision["missing"]:
             missing.append(date_text(execution))
     if missing:
         warnings.append(issue(
@@ -215,7 +215,8 @@ def preview(config, data):
                 })
         risk_window = check_risk_window(config, data, warnings, blockers)
         check_fundamentals(config, data, blockers)
-        check_macro(config, data, warnings)
+        if not blockers:
+            check_macro(config, data, warnings)
     if config.get("execution_price") == "open" and data.open_prices is None:
         blockers.append(issue("missing_open_prices", "开盘执行需要后复权开盘价。"))
     if blockers:

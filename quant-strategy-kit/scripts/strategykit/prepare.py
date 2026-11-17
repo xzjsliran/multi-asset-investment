@@ -22,8 +22,8 @@ def connect_data_kit(path):
 
 def prepare(config, data_kit, work, provider="auto", research=None, macro_data=None, cache=None):
     connect_data_kit(data_kit)
-    from quantkit.common import Client, frame, now
-    from quantkit.pipeline import get_calendar, run as download
+    from quantkit.common import DATA_SOURCES, MACRO_SOURCES, Client, frame, normalize_asset, now
+    from quantkit.pipeline import get_calendar, get_macro, get_market, run as download
     from quantkit.fundamentals import stock_features
     from quantkit.research_import import research_calendar, research_prices
     from quantkit.overseas import align_us
@@ -39,8 +39,15 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
         raise ValueError("该目录已有数据，请选择新的 work 目录；cache 可由用户复用。")
     out.mkdir(exist_ok=True)
     plan = data_plan(config)
-    if research and plan["macro"] and not macro_data:
-        raise ValueError("research 原始快照没有本次宏观指标。请提供 macro_data，或通过数据模块补取后再跑。")
+    sources = config.get("data_sources", {})
+    if set(sources) - DATA_SOURCES:
+        raise ValueError("data_sources 含未支持字段，请参照数据模块接口说明。")
+    imported_macro = pd.DataFrame()
+    if macro_data:
+        source = Path(macro_data)
+        imported_macro = pd.read_csv(source / "macro_observations.csv" if source.is_dir() else source)
+    macro_request = {"macro": sorted(set(plan["macro"]) - set(imported_macro.get("series", []))),
+                     "provider": provider, **{k: sources[k] for k in MACRO_SOURCES if k in sources}}
     start = (pd.Timestamp(config["start"]) - pd.Timedelta(days=plan["lookback_days"])).strftime("%Y-%m-%d")
     cache = Path(cache).resolve() if cache else work / "cache"
     client = Client(cache, timeout=120)
@@ -91,29 +98,24 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
     factor_codes = set(factor_prices.get("code", []))
     other_assets = [a for a in assets.values() if a["code"] not in factor_codes]
     if research:
-        prices = research_prices(research, other_assets, cal) if other_assets else pd.DataFrame()
+        archived = [a for a in other_assets if a["kind"] not in {"qdii_nav", "usd_deposit"}]
+        prices = research_prices(research, archived, cal) if archived else pd.DataFrame()
+        for a in other_assets:
+            if a["kind"] in {"qdii_nav", "usd_deposit"}:
+                d, _, _ = get_market(client, normalize_asset(a), start, config["end"], cal, provider, sources)
+                prices = pd.concat([prices, d], ignore_index=True)
     else:
         domestic = [a for a in other_assets if a["kind"] != "us_etf"]
-        if not domestic:
-            # 纯海外配置也可用：日历已经取得，不需要伪装成境内行情请求。
-            prices = pd.DataFrame()
-            if plan["macro"]:
-                from quantkit.pipeline import get_macro
-                cfg = {"macro": plan["macro"], "provider": provider, "nbs_urls": [], "nbs_crawl_pages": 0}
-                events, _, _ = get_macro(client, cfg, start, config["end"])
-                events.to_csv(out / "macro_observations.csv", index=False, encoding="utf-8-sig")
-        else:
+        prices = pd.DataFrame()
+        if domestic:
             request = {"start": config["start"], "end": config["end"], "lookback_days": plan["lookback_days"],
-                       "assets": domestic, "macro": plan["macro"], "provider": provider, "nbs_urls": [], "nbs_crawl_pages": 0}
+                       "assets": domestic, **macro_request, **sources}
             write_json(work / "data-request.json", request)
             # 第一部分会创建自己的目录，因此先写入独立目录再读取合并。
             domestic_quality = download(work / "data-request.json", work / "domestic", cache)
             # 标准行情和质量记录一同交给回测前检查。
             shutil.copy2(work / "domestic/quality.json", out / "quality.json")
             prices = pd.read_csv(work / "domestic/prices.csv")
-            macro_file = work / "domestic/macro_observations.csv"
-            if macro_file.exists():
-                (out / "macro_observations.csv").write_bytes(macro_file.read_bytes())
         overseas = [a for a in other_assets if a["kind"] == "us_etf"]
         if overseas:
             fx = frame(client.call("us_history", code="CNY=X", start=start, end=config["end"]))
@@ -124,15 +126,22 @@ def prepare(config, data_kit, work, provider="auto", research=None, macro_data=N
     pending_prices = out / "prices.partial"
     prices.to_csv(pending_prices, index=False, encoding="utf-8-sig",
                   float_format="%.12g" if factor_coverage is not None else None)
-    if macro_data:
-        source = Path(macro_data)
-        if source.is_dir():
-            source = source / "macro_observations.csv"
-        (out / "macro_observations.csv").write_bytes(source.read_bytes())
+    macro_failures = []
+    if domestic_quality:
+        acquired = pd.read_csv(work / "domestic/macro_observations.csv")
+    elif macro_request["macro"]:
+        acquired, _, macro_failures = get_macro(client, macro_request, start, config["end"])
+    else:
+        acquired = pd.DataFrame()
+    combined = [piece for piece in (acquired, imported_macro) if not piece.empty]
+    if combined:
+        pd.concat(combined, ignore_index=True).drop_duplicates().to_csv(
+            out / "macro_observations.csv", index=False, encoding="utf-8-sig")
     write_json(work / "data-plan.json", plan)
     write_json(out / "strategy_data_manifest.json", {"created_at": now(), "source": str(Path(research).resolve()) if research else "quant-data-kit",
         "start_with_warmup": start, "end": config["end"], "assets": list(assets.values()), "rows": len(prices),
         "us_alignment": "已完成纽约收盘和已知汇率向后对齐到中国交易日16时；调仓采用该已知报价的低频近似。",
+        "macro_failures": macro_failures, "macro_import": str(Path(macro_data).resolve()) if macro_data else None,
         "feature_dates": [str(x.date()) for x in sorted(dates | set(factor_pools))], "requests": client.log,
         **({"equity_factor_coverage":factor_coverage} if factor_coverage is not None else {}),
         "domestic_status": domestic_quality["status"] if domestic_quality else None})

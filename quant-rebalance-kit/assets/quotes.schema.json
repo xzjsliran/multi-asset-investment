@@ -46,7 +46,7 @@
             "type": "boolean"
           },
           "kind": {
-            "enum": ["stock", "etf", "us_etf", null],
+            "enum": ["stock", "etf", "us_etf", "qdii_nav", "usd_deposit", null],
             "description": "策略外的已有持仓按品种计费时须提供证券类型"
           },
           "execution_session": {

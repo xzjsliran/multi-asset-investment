@@ -14,9 +14,9 @@ description: 为商业客户的资产配置研究把用户的资产范围、选�
 沿用当前对话和第一部分已有的信息，只补问影响本次计算的缺项。用户说“先用默认示例”时直接选 `cross-border-allocation`，无需再逐项询问。
 
 - 资产：是否包含股票、债券、黄金、其他商品、海外资产。用户需要列表时调用 `scripts/run.py catalog`，再明确代码；黄金ETF和矿业股票分别列出。
-- 海外股票先检查境内QDII产品及历史覆盖，例如513100/513500，类型仍是etf；实际行情按境内人民币价格获取。用户明确指定美国证券，或合适境内产品/数据不足时再采用us_etf与汇率。变更证券要在配置中明确，不把QQQ/SPY价格拼进QDII历史。
+- 跨境预设使用标普 500 和纳斯达克 100 的场外人民币 QDII（`050025.OF`、`160213.OF`）和美元活期。场外基金用复权净值、公布日及赎回等待期。用户明确选择场内 ETF 或直接海外证券时，以对应代码和行情重新配置。
 - 时间与预算：回测年份、初始资金；未指定资金可采用示例100万元并说明。
-- 配置：大类比例可选固定、宏观条件配额或风险平价。宏观方案明确指标、条件和频率；风险平价明确各大类的代理篮子、回看窗口、投资总比例和样本不足的处理。阅读[风险平价说明](references/风险平价与风险贡献.md)。当前宏观配额与风险平价分别比较，同一配置不能同时启用。
+- 配置：先定基础比例和大类分组，再选风险平价、地区宏观、市场波动率调整。地区规则用本地数据判状态，可以按允许范围跨组调权。确认各组浮动、现金上限、卖出及加仓条件。 [配置与计算说明](references/配置与计算说明.md#宏观动态配置)
 - 主动 A 股默认用多因子和倒数波动率配权。用 `csi800-factor-monthly` 初始化独立股票仓，通过 `selection.universe` 改股票池。可选历史中证 800、全 A、上证 50、科创板、科创 50、沪深 300、中证 500、中证 1000 或自选代码。 [配置与计算说明](references/配置与计算说明.md)
 - 大类预算和各资产部分可设独立频率。内置预设都以月度调仓开始，用户可在配置中将所需频率改为周度或季度。
 
@@ -27,7 +27,7 @@ description: 为商业客户的资产配置研究把用户的资产范围、选�
 ## 运行
 
 1. 定位本 Skill 和数据模块。默认两者为同级 `quant-strategy-kit` / `quant-data-kit`；不同目录用 `--data-kit` 指明。读取现有环境，首次按使用指南安装依赖；本模块新增SciPy，数据模块的海外与快照扩展另有依赖。
-2. `scripts/run.py init --preset cross-border-allocation --out <工作目录/strategy.json>`；修改副本。明确使用境内QDII版本时选 `qdii-equity-allocation`；境内多资产配置用 `domestic-allocation`；VIX动态参考用 `vix-dynamic-allocation`；风险平价参考用`risk-parity-allocation`。
+2. `scripts/run.py init --preset cross-border-allocation --out <工作目录/strategy.json>` 后按需修改副本。境内组合用 `domestic-allocation`，跨境宏观用 `regional-macro-allocation`，美股或境内波指分别用 `vix-dynamic-allocation` 和 `domestic-volatility-allocation`。在任何基础组合上可启用风险平价。
 3. `scripts/run.py plan --config <配置> --out <工作目录/data-plan.json>` 查看数据需求。
 4. 已有第一部分结果可直接用于回测。缺数据时：`scripts/run.py prepare --config <配置> --data-kit <数据模块目录> --work <新工作目录>`。已有归档研究数据时可追加 `--research <归档研究目录>` 只读重建历史输入。历史财务选股需要本地Tushare权限；不可悄悄拿今天的财务或当前成分股回填历史。
 5. 通过统一插件执行研究时，先用 `research preview` 核对标准行情、日历和预热样本，再用 `research run`。独立模块仍可调用 `scripts/run.py backtest --config <配置> --data <标准数据目录> --out <新结果目录>`。数据、缓存和结果写入研究工作目录。
@@ -35,7 +35,7 @@ description: 为商业客户的资产配置研究把用户的资产范围、选�
 
 ## 解释结果时需知道
 
-- 跨境预设按固定大类权重配置，主动 A 股占 10%，以中国交易日记账。按仓位差额交易并按已确认费率扣费。参数与假设见[跨境资产配置说明](references/跨境资产配置说明.md)。
+- 跨境固定预设仍保留 10% 主动 A 股，按中国交易日记账。净额调仓按确认费率扣费。场外赎回款待到账后进入可用现金。 [跨境资产配置说明](references/跨境资产配置说明.md)
 - 协方差只取信号日前的收益，默认126个交易日；共同观测少于60次或求解失败时记录等权回退。目标为不做空、权重和为1；默认单股最多占精选部分40%，可改。
 - 信号日与成交日分开。通常本期末形成信号，下期首个交易日收盘执行持仓差额，当日收益归原持仓。回测截止日按收盘价估值并保存当日模拟持仓。
 - 宏观使用第一部分 `macro_observations.csv` 中 `signal_eligible=true` 且 `available_at` 不晚于决策时点的记录。美国月度历史快照可用数据模块 `fred-events` 转换；缺指标按配置处理，记录到regimes.json，不能手工把未核验记录改成可用。

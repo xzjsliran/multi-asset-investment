@@ -17,9 +17,9 @@ from .equity_selection import METHOD
 
 # 即使本次没有成交、选股或缺口，也保留固定表头供报告读取。
 TABLE_COLUMNS = {
-    "daily": ["date", "nav", "equity", "return", "cash_weight", "drawdown", "transaction_cost", "turnover", *COST_FIELDS],
+    "daily": ["date", "nav", "equity", "return", "cash_weight", "unsettled_redemptions_cny", "drawdown", "transaction_cost", "turnover", *COST_FIELDS],
     "weights": ["date", "sleeve", "code", "value", "weight"],
-    "trades": ["date", "signal_date", "sleeve", "code", "amount", "side", "cost", *COST_FIELDS, "internal_transfer"],
+    "trades": ["date", "signal_date", "sleeve", "code", "amount", "side", "cost", *COST_FIELDS, "internal_transfer", "settlement_sessions"],
     "selections": ["signal_date", "execution_date", "sleeve", "code", "name", "within_weight"],
     "targets": ["execution_date", "signal_date", "sleeve", "code", "target_value", "portfolio_weight"],
     "blocked": ["date", "sleeve", "code", "side", "reason", "amount"],
@@ -46,8 +46,8 @@ def review_execution(config, result, checks, omitted):
     if config["allocation"]["method"] == "risk_parity":
         method = "risk_parity"
         fallback = [row for row in regimes if row["status"] != "success"]
-    elif config["macro"]["enabled"]:
-        method = "macro"
+    elif config["macro"]["enabled"] or config.get("volatility", {}).get("enabled"):
+        method = "macro" if config["macro"]["enabled"] else "volatility"
         fallback = [row for row in regimes if row.get("fallback")]
     else:
         method, fallback = "fixed", []
@@ -105,12 +105,15 @@ def export_results(config, data, out, compare_equal=True):
             if s["weighting"]["method"] == "min_variance":
                 s["weighting"]["method"] = "equal"
         add_comparison("equal_weight", "仅将最小方差改为等权", backtest(equal, data)["daily"], "equal_weight_daily.csv")
-    if config.get("macro", {}).get("enabled") or config.get("allocation", {}).get("method") == "risk_parity":
+    if config["macro"]["enabled"] or config.get("volatility", {}).get("enabled") or config["allocation"]["method"] == "risk_parity":
         static = copy.deepcopy(config)
         # 保留相同调仓日，单独比较动态比例的影响。
         base = {s["id"]: s["weight"] for s in static["sleeves"]}
         for rule in static["macro"].get("rules", []):
             rule["weights"] = dict(base)
+        if "regions" in static["macro"]:
+            static["macro"]["enabled"] = False
+        static.pop("volatility", None)
         if static.get("allocation", {}).get("method") == "risk_parity":
             static["allocation"] = {"method": "fixed"}
         add_comparison("static", "固定权重、同样调仓日", backtest(static, data)["daily"], "static_daily.csv")
@@ -156,7 +159,7 @@ def export_results(config, data, out, compare_equal=True):
                                          for s in config["sleeves"]] + [{"id": "cash", "name": "未分配现金"}],
                              "configured_assets": all_assets(config)}, "资产部分及配置中的证券名称")
     fallback = sum(x["status"] == "fallback_equal" for x in result["optimization"])
-    missing_macro = sum(x["missing"] for x in result["regimes"] if x.get("method") != "risk_parity")
+    missing_macro = sum(x["missing"] for x in result["regimes"] if x.get("method") != "risk_parity" or x.get("overlay"))
     checks = {"weights_sum_max_error": float((result["weights"].groupby("date")["weight"].sum()-1).abs().max()),
               "contribution_error": float(sum(result["contributions"].values())-(summary["final_equity"]-config["initial_capital"])),
               "future_signal_trades": int((pd.to_datetime(result["trades"]["signal_date"]) >= pd.to_datetime(result["trades"]["date"])).sum()) if not result["trades"].empty else 0,
@@ -168,16 +171,21 @@ def export_results(config, data, out, compare_equal=True):
               "cost_breakdown": {field: float(daily[field].sum()) for field in COST_FIELDS},
               "position_policy": "long_only", "negative_position_rows": int(result["weights"]["weight"].lt(0).sum()),
               "negative_target_rows": int(result["targets"]["target_value"].lt(0).sum()),
-              "minimum_cash_weight": float(daily["cash_weight"].min())}
+              "minimum_cash_weight": float(daily["cash_weight"].min()),
+              "maximum_dynamic_target_cash_weight": max((r["overlay"]["cash_weight"] for r in result["regimes"] if "overlay" in r), default=None)}
     save_json("checks.json", checks, "资金、时序及数据缺口核对")
     execution = review_execution(config, result, checks, omitted)
     notes = ["所有资产只做多；目标权重及持仓非负，不使用融资杠杆。",
              "回测按成交额计佣金及滑点，A股卖出按已确认费率计印花税。建仓时扣费，现金收益为零，允许分数份额。",
              ("按上一个交易日信号在下期首个交易日开盘执行差额，收盘估值。基准以首个执行日开盘水平起算。"
               if at_open else "信号日收盘形成目标，下一中国交易日收盘按持仓差额调仓。当日收益先归旧持仓，回测截止日保留持仓估值。"),
-             "复权单位用于收益记账；未完整模拟涨跌停和整手成交。",
-             "境内QDII使用其自身人民币场内价格，包含市场折溢价的变化；不重复乘汇率。"]
-    if any(a["kind"] == "us_etf" for a in all_assets(config)):
+             "复权单位用于收益记账；未完整模拟涨跌停和整手成交。"]
+    kinds = {a["kind"] for a in all_assets(config)}
+    if "qdii_nav" in kinds:
+        notes.append("场外QDII用已公布人民币净值模拟申赎，赎回款按约定交易日到账后才可使用。实际确认净值、份额和申购限额以渠道确认记录为准。")
+    if "usd_deposit" in kinds:
+        notes.append("美元活期按历史挂牌年利率逐日累计，以已知美元兑人民币汇率估值。")
+    if "us_etf" in kinds:
         notes.append("直接美国ETF按已知汇率折成人民币，成交采用已完成报价的日线近似。")
     if config.get("allocation", {}).get("method") == "risk_parity":
         notes.append("大类风险平价采用事先配置的代理篮子及信号日前收益；目标风险贡献基于收缩协方差，实际组合风险贡献由回测盈亏另行计算。代理估计不等于实际持仓的历史业绩。")

@@ -48,11 +48,17 @@ def validate_plan(p):
         raise ValueError("预计调整后权益及费用与原账户权益不一致。")
     current_cash = sum(x["amount"]*p["fx"][x["currency"]] for x in p["cash_before"])
     projected_cash = sum(x["amount"]*p["fx"][x["currency"]] for x in p["cash_after"])
+    receivables = p.get("unsettled_redemptions", [])
+    for row in receivables:
+        nonnegative(row["amount_cny"], "待到账赎回款")
+    pending = sum(row["amount_cny"] for row in receivables)
+    if abs(pending - p["account"].get("unsettled_redemptions_cny", 0.)) > .01:
+        raise ValueError("待到账赎回款与账户概要不一致。")
     if abs(current_cash-p["account"]["cash_before_cny"]) > .01 or abs(projected_cash-p["account"]["cash_after_cny"]) > .01:
         raise ValueError("账户概要的现金与分币种现金不一致。")
     account_values = [
         (sum(x["current_value_cny"] for x in p["holdings"]) + current_cash, equity),
-        (sum(x["projected_value_cny"] for x in p["holdings"]) + projected_cash, projected_equity),
+        (sum(x["projected_value_cny"] for x in p["holdings"]) + projected_cash + pending, projected_equity),
         (sum(x["target_value_cny"] for x in p["targets"]), equity),
     ]
     for value, expected in account_values:
@@ -85,6 +91,7 @@ def validate_plan(p):
         if abs(row["target_value_cny"]/equity-row["target_weight"]) > 1e-8:
             raise ValueError("目标金额与目标权重不一致。")
     fees_cny = defaultdict(float)
+    pending_orders = defaultdict(float)
     for row in p["orders"]:
         nonnegative(row["quantity"], "买卖数量")
         if row["code"] in orders or row["side"] not in {"buy", "sell"}:
@@ -113,7 +120,19 @@ def validate_plan(p):
         cash_change = -signed*q["price"] - native_cost
         if abs(cash_change - row.get("estimated_cash_change_native", cash_change)) > .01:
             raise ValueError("订单净现金变化与费用不一致。")
-        cash_changes[row["currency"]] += cash_change
+        if row.get("settlement_sessions", 0):
+            if signed >= 0 or q.get("kind") != "qdii_nav":
+                raise ValueError("延期到账只用于场外基金赎回。")
+            pending_orders[row["code"]] += cash_change * p["fx"][row["currency"]]
+        else:
+            cash_changes[row["currency"]] += cash_change
+    pending_details = defaultdict(float)
+    for row in receivables:
+        pending_details[row["code"]] += row["amount_cny"]
+    if pending_details.keys() != pending_orders.keys() or any(
+        abs(amount - pending_details[code]) > .01 for code, amount in pending_orders.items()
+    ):
+        raise ValueError("待到账赎回款与拟赎回订单不一致。")
     if costs and (abs(estimated_cost - sum(fees_cny.values())) > .01 or any(
         abs(costs[f"{key}_cny"] - fees_cny[key]) > .01 for key in cost_fields
     )):
@@ -171,10 +190,13 @@ def export_rebalance(directory, out):
                                              [("commission_cny", "佣金"), ("slippage_cny", "滑点"), ("stamp_duty_cny", "印花税")])],
                 ["预计调整后权益（元）", fmt(p["account"].get("projected_equity_cny", p["account"]["equity_cny"]))],
                 ["持仓方向", "全部资产只做多，现金不透支"]]
+    if p.get("unsettled_redemptions"):
+        overview.append(["待到账赎回款（元）", fmt(p["account"]["unsettled_redemptions_cny"])])
     allocations = []
     for sid in names:
         before = sum(x["current_value_cny"] for x in p["holdings"] if x["sleeve"] == sid)+sum(x["amount"]*p["fx"][x["currency"]] for x in p["cash_before"] if x["sleeve"] == sid)
         after = sum(x["projected_value_cny"] for x in p["holdings"] if x["sleeve"] == sid)+sum(x["amount"]*p["fx"][x["currency"]] for x in p["cash_after"] if x["sleeve"] == sid)
+        after += sum(x["amount_cny"] for x in p.get("unsettled_redemptions", []) if x["sleeve"] == sid)
         target = sum(x["target_value_cny"] for x in p["targets"] if x["sleeve"] == sid)
         equity = p["account"]["equity_cny"]
         after_equity = p["account"].get("projected_equity_cny", equity)
@@ -193,12 +215,18 @@ def export_rebalance(directory, out):
                    "；".join(x.get("notes", [])) or "—"] for x in p["optimization"]]
     conditions = macro_text(c.get("macro", {}), names)
     if c.get("allocation",{}).get("method") == "risk_parity":
-        conditions = "大类配权采用风险平价；组合内部继续执行已确认的选股与配权规则。"
+        conditions = "大类配权采用风险平价。" + conditions
     regime = p.get("regime")
     risk_rows = []
     risk_note = ""
     if regime:
         conditions = conditions.rstrip("。")+"。本次配置状态："+regime["state"]
+        if regime.get("overlay"):
+            overlay = regime["overlay"]
+            labels = {"CN": "中国", "US": "美国"}
+            states = [labels[key] + " " + row["state"] for key, row in overlay["regions"].items()]
+            states += [row["series"] + " " + row["state"] for row in overlay["volatility"]]
+            conditions += "。" + "，".join(states) + f"。目标共享现金 {pct(overlay['cash_weight'])}。"
         for x in regime.get("inputs", []):
             conditions += f"；{x['series']}："+(f"{x['value']}，统计期{x['period']}，可用时间{display_time(x['available_at'])}" if 'value' in x else x.get('reason', '未提供'))
         if regime.get("method") == "risk_parity":

@@ -14,7 +14,132 @@
     "kind": "etf"
   },
   "macro": {
-    "enabled": false
+    "enabled": false,
+    "regions": {
+      "CN": {
+        "rules": [
+          {
+            "name": "景气偏强且通胀上行",
+            "all": [
+              {
+                "series": "cn_pmi",
+                "op": ">=",
+                "threshold": 50
+              },
+              {
+                "series": "cn_cpi_yoy",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "cn_equity": 0.02,
+              "cn_bonds": -0.03,
+              "gold": 0.01
+            }
+          },
+          {
+            "name": "景气偏强且通胀持平或下行",
+            "all": [
+              {
+                "series": "cn_pmi",
+                "op": ">=",
+                "threshold": 50
+              },
+              {
+                "series": "cn_cpi_yoy",
+                "op": "<=",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "cn_equity": 0.04,
+              "cn_bonds": -0.04
+            }
+          },
+          {
+            "name": "景气偏弱且通胀上行",
+            "all": [
+              {
+                "series": "cn_pmi",
+                "op": "<",
+                "threshold": 50
+              },
+              {
+                "series": "cn_cpi_yoy",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "cn_equity": -0.05,
+              "cn_bonds": -0.025,
+              "gold": 0.04
+            }
+          },
+          {
+            "name": "景气偏弱且通胀持平或下行",
+            "all": [
+              {
+                "series": "cn_pmi",
+                "op": "<",
+                "threshold": 50
+              },
+              {
+                "series": "cn_cpi_yoy",
+                "op": "<=",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "cn_equity": -0.04,
+              "cn_bonds": 0.04
+            }
+          }
+        ],
+        "modifiers": [
+          {
+            "name": "中国操作利率上行",
+            "all": [
+              {
+                "series": "cn_policy_rate",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "cn_bonds": -0.015,
+              "gold": 0.015
+            }
+          },
+          {
+            "name": "中国城镇调查失业率上行",
+            "all": [
+              {
+                "series": "cn_unemployment",
+                "op": ">",
+                "threshold": 0.2,
+                "transform": "change",
+                "periods": 3
+              }
+            ],
+            "changes": {
+              "cn_equity": -0.01
+            }
+          }
+        ]
+      }
+    }
   },
   "sleeves": [
     {
@@ -39,7 +164,7 @@
     {
       "id": "equity",
       "name": "股票宽基",
-      "weight": 0.3,
+      "weight": 0.25,
       "rebalance": "monthly",
       "assets": [
         {
@@ -58,7 +183,7 @@
     {
       "id": "gold",
       "name": "黄金",
-      "weight": 0.2,
+      "weight": 0.15,
       "rebalance": "monthly",
       "assets": [
         {
@@ -102,54 +227,74 @@
       "weighting": {
         "method": "equal"
       }
-    }
-  ],
-  "allocation": {
-    "method": "risk_parity",
-    "lookback": 126,
-    "min_observations": 60,
-    "shrinkage": 0.1,
-    "invested_weight": 1.0,
-    "fallback": "base_weights",
-    "proxies": {
-      "bond": [
-        {
-          "code": "511010.SH",
-          "name": "国债ETF",
-          "kind": "etf"
-        }
-      ],
-      "equity": [
+    },
+    {
+      "id": "stocks",
+      "name": "主动A股",
+      "weight": 0.1,
+      "rebalance": "monthly",
+      "assets": [],
+      "risk_proxy": [
         {
           "code": "510300.SH",
           "name": "沪深300ETF",
           "kind": "etf"
+        },
+        {
+          "code": "510500.SH",
+          "name": "中证500ETF",
+          "kind": "etf"
         }
+      ],
+      "selection": {
+        "method": "quality_value_dividend",
+        "universe": "csi800",
+        "top_n": 20,
+        "buffer_rank": 40,
+        "max_per_industry": 2,
+        "small_cap_weight": 0.1
+      },
+      "weighting": {
+        "method": "inverse_volatility",
+        "max_weight": 0.08
+      }
+    }
+  ],
+  "volatility": {
+    "enabled": false,
+    "signals": [
+      {
+        "series": "cn_vix50",
+        "switch_to": "cn_vix300",
+        "switch_from": "2020-01-01",
+        "groups": [
+          "cn_equity"
+        ],
+        "enter": 25,
+        "exit": 22
+      }
+    ]
+  },
+  "allocation_limits": {
+    "groups": {
+      "cn_equity": [
+        "equity",
+        "stocks"
+      ],
+      "cn_bonds": [
+        "bond"
       ],
       "gold": [
-        {
-          "code": "518880.SH",
-          "name": "黄金ETF",
-          "kind": "etf"
-        }
+        "gold"
       ],
       "commodity": [
-        {
-          "code": "159980.SZ",
-          "name": "有色ETF",
-          "kind": "etf"
-        },
-        {
-          "code": "159981.SZ",
-          "name": "能源化工ETF",
-          "kind": "etf"
-        },
-        {
-          "code": "159985.SZ",
-          "name": "豆粕ETF",
-          "kind": "etf"
-        }
+        "commodity"
       ]
-    }
+    },
+    "max_shift": 0.05,
+    "max_cash": 0.25
+  },
+  "allocation": {
+    "method": "risk_parity"
   }
 }

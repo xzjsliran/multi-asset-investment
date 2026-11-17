@@ -69,8 +69,12 @@ class RiskAllocation(unittest.TestCase):
         c,d=fixture();c["allocation"]["proxies"]["A"][0]["code"]="PROXY"
         self.assertIn("PROXY",[a["code"] for a in data_plan(c)["assets"]])
         c["macro"]={"enabled":True,"rules":[{"name":"条件","all":[{"series":"vix","op":">","threshold":20}],"weights":{"A":.2,"B":.8}}]}
-        with self.assertRaisesRegex(ValueError,"不能同时"):validate(c)
+        with self.assertRaisesRegex(ValueError,"互斥"):validate(c)
         c,d=fixture();del c["allocation"]["proxies"]["A"]
+        with self.assertRaisesRegex(ValueError,"投资比例"):validate(c)
+        del c["allocation"]["invested_weight"]
+        self.assertEqual(validate(c)["allocation"]["invested_weight"], .5)
+        c["allocation"]["proxies"]["unknown"] = c["allocation"]["proxies"].pop("B")
         with self.assertRaisesRegex(ValueError,"代理"):validate(c)
 
     def test_only_outer_events_recalculate_and_static_is_comparable(self):

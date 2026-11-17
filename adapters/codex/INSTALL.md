@@ -1,6 +1,6 @@
 # Codex 安装与首次使用
 
-从本地交付目录或 GitHub Release 获取 `multi-asset-investment-codex-v1.0.0.zip`，解压得到 `multi-asset-investment-codex` 文件夹。保留整个文件夹，并放在后续可以持续访问的位置。
+从本地交付目录或 GitHub Release 获取 `multi-asset-investment-codex-v1.1.0.zip`，解压得到 `multi-asset-investment-codex` 文件夹。保留整个文件夹，并放在后续可以持续访问的位置。
 
 包内包含 Codex 插件清单、一个统一 Skill、四个代码模块、报告模板和本地插件目录清单。无需部署网页或 MCP 服务。实际取数使用 AKShare 等免费源，也可配置个人 Tushare/iFinD 凭证。
 

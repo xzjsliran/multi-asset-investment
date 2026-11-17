@@ -1,28 +1,20 @@
-# 海外资产可以先用境内QDII
+# 场外 QDII 与美元存款行情
 
-“资产投向哪里”与“证券在哪里交易”分开看。境内上市的QDII ETF可以提供海外股票敞口，仍通过现有境内ETF行情函数获取。
+## 场外净值
 
-## 已核实的两种选择
+| 敞口 | 预设标的 | 行情 |
+|---|---|---|
+| 标普 500 | 博时标普 500 ETF 联接 A 人民币 `050025.OF` | 人民币场外净值 |
+| 纳斯达克 100 | 国泰纳斯达克 100 指数 QDII `160213.OF` | 人民币场外净值 |
 
-| 希望研究的方向 | 境内产品 | 配置类型 | 行情与日历 | 直接海外选择 |
-| --- | --- | --- | --- | --- |
-| 纳斯达克100 | 国泰纳斯达克100ETF，513100.SH | etf | 人民币场内行情、中国交易日 | QQQ，us_etf |
-| 标普500 | 博时标普500ETF，513500.SH | etf | 人民币场内行情、中国交易日 | SPY，us_etf |
+配置用 `kind=qdii_nav`。Tushare `fund_nav` 请求 `market=O`，取 `unit_nav` 作为原始参考价，`adj_nav` 作为研究净值，分别保留 `nav_date` 和 `ann_date`。只有公布日期时，按北京时间次日零点后可用。同一净值日使用第一个可核验的版本。人民币净值已含折算后的资产价值。 [Tushare 公募基金净值](https://tushare.pro/document/2?doc_id=119) · [博时基金](https://www.bosera.com/service/fundSalesOrg.do?fundCode=050025) · [国泰基金](https://www.gtfund.com/product/productlist/haiwai/160213/summary/index.html)
 
-基金身份见 [国泰产品页](https://www.gtfund.com/product/productlist/haiwai/513100/index.html)、[博时法律文件及产品资料](https://www.bosera.com/column/index.do?classid=0002000200030004&fundCode=513500)。[AKShare官方基金接口文档](https://github.com/akfamily/akshare/blob/main/docs/data/fund/fund_public.md) 的 `fund_etf_hist_em` 日线示例就使用513500。
+场外配置用净值模拟，避开场内折溢价。回测采用最新已经公布的净值近似申赎价格。赎回款按产品配置的 `redemption_days` 保留在待到账款，到账后进入可用资金。实际申购限额、基金确认净值和份额以渠道公告或成交回执为准。 [国泰基金招募说明书](https://st.gtfund.com/report_root/2024/06/%E5%9B%BD%E6%B3%B0%E7%BA%B3%E8%BE%BE%E5%85%8B100%E6%8C%87%E6%95%B0%E8%AF%81%E5%88%B8%E6%8A%95%E8%B5%84%E5%9F%BA%E9%87%91%E6%9B%B4%E6%96%B0%E6%8B%9B%E5%8B%9F%E8%AF%B4%E6%98%8E%E4%B9%A6%EF%BC%882024%E5%B9%B4%E7%AC%AC%E4%B8%80%E5%8F%B7%EF%BC%89.pdf)
 
-## 在代码中怎么处理
+自定义组合也可用场内 QDII 的 `etf` 类型，例如 `513500.SH` 或 `513100.SH`，按人民币市场价和相应的复权行情运算。直接购买美国证券用 `us_etf` 和已知汇率。各标的分别取数和检验覆盖。
 
-- `kind=etf`，代码写成513100.SH或513500.SH，通过境内ETF取数和清理流程。
-- 原始收盘用于查看场内报价，复权价格用于组合收益；价格已经以人民币计价，不额外乘USD/CNY。
-- 产品价格包含汇率、折溢价和跟踪差异的影响。QDII与QQQ/SPY会产生不同的回测结果，名称与配置均应保留各自代码。
-- 按中国交易日记录报价。只有直接持有美股ETF时，才需要单独对齐纽约收盘和汇率。
-- 数据源失败先检查同一证券的备用来源；若换成另一只ETF，保存为明确的新方案。不在旧证券上市前补入另一只的价格。
+## 美元活期
 
-优先根据用户的交易渠道和资产意图检查境内产品。用户指定美国证券，或没有适合的境内产品及足够历史时，再使用直接海外路线。
+`USD_DEPOSIT` 的类型为 `usd_deposit`。按生效日读取中国银行境内美元活期挂牌年利率，逐日累计美元利息。估值时乘以决策前可用的美元兑人民币汇率。存款利率可按实际账户另填，用 `data_sources.usd_deposit_rates` 传入带来源的牌价表。 [中国银行外汇存款挂牌档案](https://www.boc.cn/fimarkets/lilv/fd33/)
 
-## 配置示例
-
-策略模块的预设 `qdii-equity-allocation` 为海外股票指数配置 20%。纳斯达克 100 成长仓位和标普 500 宽基仓位各占全组合的 10%，分别使用 513100.SH 和 513500.SH。直接持有美股 ETF 的对应产品是 QQQ 和 SPY。
-
-美元短债SHY仍保留直接海外取数。不能仅凭同属债券类别，就认定境内产品在久期、币种及历史覆盖上可替代它；改成国内国债属于用户重新选择债券配置，不能当作换一个数据源。
+汇率优先使用 Yahoo `CNY=X`，FRED `DEXCHUS` 作备选。后一来源按 H.10 次周发布时点对齐。存款占用已投资预算，未分配现金另行记录。 [FRED 美元兑人民币汇率](https://fred.stlouisfed.org/series/DEXCHUS)

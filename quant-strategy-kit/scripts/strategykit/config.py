@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from .costs import normalize_costs, rate
+from .allocation import indicator_plan, validate_condition, validate_overlays
+from .costs import ASSET_KINDS, normalize_costs, rate
 from .equity_selection import DEFAULT_POOL, METHOD, pool_request
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -76,8 +77,14 @@ def validate(config):
         if sel["method"] in {"fixed", "momentum"} and not s.get("assets"):
             raise ValueError(s["id"] + " 需要明确资产代码。")
         for a in s.get("assets", []):
-            if a.get("kind") not in {"etf", "stock", "us_etf"} or not a.get("code"):
-                raise ValueError("资产需填写 code 和 etf / stock / us_etf 类型。")
+            if a.get("kind") not in ASSET_KINDS or not a.get("code"):
+                raise ValueError("资产需填写 code 和受支持的 kind。")
+            if a["kind"] in {"qdii_nav", "usd_deposit"} and c.get("execution_price") == "open":
+                raise ValueError("场外基金净值和美元存款使用收盘研究口径。")
+            if a["kind"] == "qdii_nav":
+                lag = a.get("redemption_days")
+                if type(lag) is not int or not 1 <= lag <= 30:
+                    raise ValueError("场外基金需填写赎回回款等待的境内交易日数 redemption_days。")
             if not math.isfinite(float(a.get("weight", 1.))) or a.get("weight", 1.) < 0:
                 raise ValueError("各证券的固定配权须为有限非负数；所有资产只做多。")
             if a.get("side", "long") != "long":
@@ -109,7 +116,8 @@ def validate(config):
     if sum(s["weight"] for s in sleeves) > 1 + 1e-9:
         raise ValueError("总权重不能超过 100%；不足的部分留现金。")
     macro = c.setdefault("macro", {"enabled": False})
-    if macro.get("enabled"):
+    validate_overlays(c, ids)
+    if macro.get("enabled") and "regions" not in macro:
         if macro.get("rebalance", "monthly") not in FREQUENCIES:
             raise ValueError("宏观调整频率无效。")
         if macro.get("missing", "base_weights") not in {"base_weights", "hold"}:
@@ -126,39 +134,42 @@ def validate(config):
             if not conditions:
                 raise ValueError("宏观规则需要 all 或 any 条件。")
             for cond in conditions:
-                if cond.get("op") not in {">", ">=", "<", "<=", "=="}:
-                    raise ValueError("宏观比较符不支持。")
-                if cond.get("transform", "level") not in {"level", "change", "mean"}:
-                    raise ValueError("宏观变化形式为 level、change 或 mean。")
-                if int(cond.get("periods", 1)) < 1:
-                    raise ValueError("宏观回看期数至少为 1。")
+                validate_condition(cond)
     allocation = c.setdefault("allocation", {"method": "fixed"})
     if allocation.get("method") not in {"fixed", "risk_parity"}:
         raise ValueError("大类配权支持 fixed、risk_parity。")
     if allocation["method"] == "risk_parity":
-        if macro.get("enabled"):
-            raise ValueError("当前风险平价与宏观条件配额分别运行比较；同一配置不能同时启用。")
+        if macro.get("enabled") and "regions" not in macro:
+            raise ValueError("旧式整组宏观权重与风险平价互斥；叠加时使用地区宏观规则。")
         allowed = {"method", "proxies", "lookback", "min_observations", "shrinkage", "invested_weight", "fallback"}
         if set(allocation) - allowed:
             raise ValueError("存在未支持的风险平价参数。")
+        if "proxies" not in allocation:
+            allocation["proxies"] = {
+                s["id"]: s.get("risk_proxy", s.get("assets", [])) for s in sleeves
+                if not s.get("assets") or any(a["kind"] != "usd_deposit" for a in s["assets"])
+            }
+        proxies = allocation["proxies"]
+        if not proxies or not set(proxies) <= set(ids):
+            raise ValueError("风险平价需提供当前配置中参与配权的代理篮子 proxies。")
+        selected_weight = sum(s["weight"] for s in sleeves if s["id"] in proxies)
+        reserved = sum(s["weight"] for s in sleeves if s["id"] not in proxies)
         for k, v in {"lookback":126, "min_observations":60, "shrinkage":.1,
-                     "invested_weight":sum(s["weight"] for s in sleeves), "fallback":"base_weights"}.items():
+                     "invested_weight":selected_weight, "fallback":"base_weights"}.items():
             allocation.setdefault(k, v)
         if not all(isinstance(allocation[k], int) and not isinstance(allocation[k], bool) for k in ["lookback", "min_observations"]):
             raise ValueError("风险估计窗口须为整数交易日。")
         if not 2 <= allocation["min_observations"] <= allocation["lookback"]:
             raise ValueError("风险平价最少样本应介于2和回看天数之间。")
-        if not 0 < allocation["shrinkage"] <= 1 or not 0 < allocation["invested_weight"] <= 1:
-            raise ValueError("风险平价收缩系数和投资比例须在(0,1]。")
+        if not 0 < allocation["shrinkage"] <= 1 or not 0 < allocation["invested_weight"] <= 1 - reserved + 1e-9:
+            raise ValueError("风险平价投资比例须为正，且能够保留其余资产的基础预算。")
         if allocation["fallback"] not in {"base_weights", "hold", "error"}:
             raise ValueError("风险平价回退为 base_weights、hold 或 error。")
-        if set(allocation.get("proxies", {})) != set(ids):
-            raise ValueError("风险平价需为每个资产部分提供风险代理篮子proxies。")
         for basket in allocation["proxies"].values():
             if not isinstance(basket, list) or not basket:
                 raise ValueError("每个风险代理篮子须为非空资产列表。")
             for a in basket:
-                if a.get("kind") not in {"etf", "stock", "us_etf"} or not a.get("code"):
+                if a.get("kind") not in ASSET_KINDS or not a.get("code"):
                     raise ValueError("风险代理需明确code和kind。")
                 if set(a) & {"from", "until"} or a.get("side", "long") != "long":
                     raise ValueError("风险代理采用事先固定的只做多篮子；分段研究请分别指定代理。")
@@ -167,6 +178,14 @@ def validate(config):
             if sum(a.get("weight", 1) for a in basket) <= 0 or len({a["code"] for a in basket}) != len(basket):
                 raise ValueError("风险代理权重合计须为正，篮子代码不能重复。")
     return c
+
+
+def allocation_frequencies(config):
+    frequencies = {config["allocation_rebalance"]}
+    macro = config.get("macro", {})
+    if macro.get("enabled") and "regions" not in macro:
+        frequencies.add(macro.get("rebalance", "monthly"))
+    return sorted(frequencies)
 
 
 def schedule(calendar, start, end, frequency):
@@ -200,18 +219,18 @@ def all_assets(c):
         for a in basket:
             if a["code"] in found and found[a["code"]]["kind"] != a["kind"]:
                 raise ValueError("风险代理与持仓资产的代码类型冲突。")
-            found[a["code"]] = {k: v for k, v in a.items() if k != "weight"}
+            found.setdefault(a["code"], {k: v for k, v in a.items() if k != "weight"})
     return list(found.values())
 
 
 def data_plan(c):
     stocks = [s for s in c["sleeves"] if s["selection"]["method"] in {"quality_value", "fundamental", METHOD}]
-    macro = c.get("macro", {})
-    indicators = sorted({p["series"] for r in macro.get("rules", [])
-                         for p in r.get("all", []) + r.get("any", [])}) if macro.get("enabled") else []
+    indicators = indicator_plan(c)
     windows = [s["weighting"].get("lookback", 0) for s in c["sleeves"]]
     windows += [s["selection"].get("lookback", 0) for s in c["sleeves"]]
     windows += [c.get("allocation", {}).get("lookback", 0)]
+    if c.get("volatility", {}).get("enabled"):
+        windows += [s["slow"] for s in c["volatility"]["signals"]]
     days = max(400, int(max(windows, default=0) * 1.8) + 30)
     return {"start": c["start"], "end": c["end"], "lookback_days": days,
             "assets": all_assets(c), "macro": indicators,
@@ -222,4 +241,5 @@ def data_plan(c):
                                     for s in stocks if s["selection"]["method"] == METHOD],
             "source_notes": ["境内行情沿用第一部分的数据模块。",
                              "财务选股需要历史估值、财报公告日、历史行业和名称；通过本地 Tushare 或已有 research 原始快照获取。",
+                             "场外 QDII 按已公布复权净值建模；美元活期按生效日牌价计息后换算人民币。",
                              "美国 ETF 用复权价格，按已知 USD/CNY 换算人民币；每条美股报价从下一次中国决策时点起使用。"]}

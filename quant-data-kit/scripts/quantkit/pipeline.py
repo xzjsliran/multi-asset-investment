@@ -4,12 +4,15 @@ from __future__ import annotations
 import html
 import importlib.metadata
 from pathlib import Path
+import os
 import shutil
 
 import pandas as pd
 
 from .common import Client, frame, now, read_request, token_value, write_json, year_chunks
 from .cleaning import EVENT_COLUMNS, align_macro, calendar_frame, clean_market, macro_events
+from .catalog import FRED
+from .local_volatility import CN_VOLATILITY
 
 
 def save_csv(df, path):
@@ -35,7 +38,40 @@ def get_calendar(client, start, end, provider):
     raise ValueError("交易日历不可用：" + str(failures))
 
 
-def get_market(client, asset, start, end, calendar, provider):
+def net_asset_prices(client, asset, start, end, days, provider, sources):
+    from .instruments import deposit_marks, nav_marks
+    code = asset["code"]
+    if asset["kind"] == "qdii_nav":
+        if provider == "free":
+            raise ValueError("场外人民币复权净值及公告日需要 Tushare fund_nav 权限。")
+        parts = [frame(client.call("fund_nav_ts", code=code, start=first, end=last))
+                 for first, last in year_chunks(start, end)]
+        return nav_marks(code, pd.concat(parts, ignore_index=True), days)
+    rates = sources.get("usd_deposit_rates")
+    if not rates:
+        rates = frame(client.call("boc_usd_rates", start=start, end=end))
+    fx_start = (pd.Timestamp(start) - pd.Timedelta(days=18)).strftime("%Y-%m-%d")
+    try:
+        fx = client.call("us_history", code="CNY=X", start=fx_start, end=end)
+    except RuntimeError:
+        fx = client.call("usd_cny", start=fx_start, end=end)
+    prices = deposit_marks(code, frame(fx), pd.DataFrame(rates), days, fx["source"])
+    prices["rate_source"], prices["source"] = prices["source"], fx["source"]
+    return prices
+
+
+def get_market(client, asset, start, end, calendar, provider, sources=None):
+    if asset["kind"] in {"qdii_nav", "usd_deposit"}:
+        days = calendar.loc[calendar["date"].between(pd.Timestamp(start), pd.Timestamp(end)), "date"]
+        d = net_asset_prices(client, asset, start, end, days, provider, sources or {})
+        valid = d["price_valid"]
+        if not valid.any():
+            raise ValueError("没有取得可用的人民币净值行情。")
+        d["quality_status"] = valid.map({True: "ok", False: "missing"})
+        counts = {"missing": int((~valid).sum())} if not valid.all() else {}
+        return d, {"code": asset["code"], "source": str(d["source"].iloc[-1]),
+                   "valid_days": int(valid.sum()), "expected_days": len(d), "issues": counts,
+                   "off_calendar_dates": [], "amount_missing_days": len(d)}, []
     ops = ["market_ts"] if provider == "tushare" else ["market_em", "market_sina"]
     if provider == "auto" and token_value():
         ops.append("market_ts")
@@ -69,8 +105,27 @@ def get_market(client, asset, start, end, calendar, provider):
 
 def get_macro(client, config, start, end):
     events, failures, status = [], [], []
-    for series in config.get("macro", []):
+    requested = config.get("macro", [])
+    for series in requested:
+        if series in {"cn_policy_rate", "cn_unemployment"}:
+            continue  # 这两项以有公布日的原公告入库。
+        if series in FRED and FRED[series]["frequency"] == "monthly" and config.get("fred_vintages", True):
+            if os.getenv("FRED_API_KEY", "").strip():
+                try:
+                    result = client.call("fred_realtime", series=series, start=start, end=end)
+                    d = frame(result)
+                    if d.empty:
+                        raise ValueError("ALFRED 没有返回所需版本。")
+                    events.append(d)
+                    status.append({"series": series, "source": "alfred", "rows": len(d),
+                                   "first_period": d["period"].min(), "last_period": d["period"].max(),
+                                   "signal_eligible_rows": len(d)})
+                    continue
+                except Exception as e:
+                    failures.append({"source": "alfred", "series": series, "error": str(e)})
         ops = ["macro"]
+        if series in CN_VOLATILITY:
+            ops = ["cn_volatility"]
         if series in {"cn_pmi", "cn_cpi_yoy"}:
             if config["provider"] == "tushare":
                 ops = ["macro_ts"]
@@ -79,12 +134,21 @@ def get_macro(client, config, start, end):
         success = False
         for op in ops:
             try:
-                result = client.call(op, series=series, start=start, end=end)
-                d = macro_events(series, frame(result), result, start, end)
+                if op == "cn_volatility" and config.get("hcvix_saved_page"):
+                    from .local_volatility import HCVIX_URL, volatility_closes
+                    from .providers import pack
+                    saved = Path(config["hcvix_saved_page"]).read_text(encoding="utf-8")
+                    result = pack(volatility_closes(saved), source="hcquant_saved_page", source_url=HCVIX_URL)
+                elif op == "cn_volatility":
+                    result = client.call(op)
+                else:
+                    result = client.call(op, series=series, start=start, end=end)
+                # 两条境内波指保留已取得的完整早期序列，复现首次切换所需的预热。
+                first = min(start, "2015-02-09") if series in CN_VOLATILITY else start
+                d = macro_events(series, frame(result), result, first, end)
                 if d.empty:
                     raise ValueError("所选时间段没有非空指标值。")
                 events.append(d)
-                from .catalog import FRED
                 monthly = series in {"cn_pmi", "cn_cpi_yoy"} or (series in FRED and FRED[series]["frequency"] == "monthly")
                 expected_periods = [str(x) for x in pd.period_range(start[:7], end[:7], freq="M")] if monthly else []
                 status.append({"series": series, "source": result["source"], "rows": len(d),
@@ -107,7 +171,7 @@ def get_macro(client, config, start, end):
     for url in dict.fromkeys(urls):
         try:
             event = client.call("nbs_url", url=url)["event"]
-            if event["series"] in config.get("macro", []) and start[:7] <= event["period"] <= end[:7]:
+            if event["series"] in requested and start[:7] <= event["period"] <= end[:7]:
                 events.append(pd.DataFrame([event]))
         except Exception as e:
             failures.append({"source": "nbs_release", "url": url, "error": str(e)})
@@ -115,11 +179,32 @@ def get_macro(client, config, start, end):
         try:
             from .providers import nbs_article
             event = nbs_article(Path(entry["file"]).read_text(encoding="utf-8"), entry["url"])
-            if event["series"] in config.get("macro", []) and start[:7] <= event["period"] <= end[:7]:
+            if event["series"] in requested and start[:7] <= event["period"] <= end[:7]:
                 events.append(pd.DataFrame([event]))
         except Exception as e:
             failures.append({"source": "nbs_saved_page", "error": str(e)})
+    if "cn_policy_rate" in requested:
+        from .providers import pbc_rate_article
+        rates = []
+        inputs = [{"url": url} for url in config.get("pbc_urls", [])] + config.get("pbc_saved_pages", [])
+        for entry in inputs:
+            try:
+                url = entry["url"]
+                event = (pbc_rate_article(Path(entry["file"]).read_text(encoding="utf-8"), url) if entry.get("file")
+                         else client.call("pbc_rate_url", url=url)["event"])
+                if event["period"] <= end:
+                    rates.append(event)
+            except Exception as e:
+                failures.append({"source": "pbc_omo_release", "url": entry.get("url"), "error": str(e)})
+        if rates:
+            events.append(pd.DataFrame(rates))
     combined = pd.concat(events, ignore_index=True) if events else pd.DataFrame(columns=EVENT_COLUMNS)
+    for series in ("cn_policy_rate", "cn_unemployment"):
+        if series in requested:
+            rows = combined.loc[combined["series"].eq(series)]
+            status.append({"series": series, "source": "official_release", "rows": len(rows),
+                           "signal_eligible_rows": len(rows), "first_period": rows["period"].min() if len(rows) else None,
+                           "last_period": rows["period"].max() if len(rows) else None})
     # 同一统计期保留“当前下载”和“公告原值”两个版本，只有后者默认进历史信号。
     return combined.drop_duplicates().reset_index(drop=True), status, failures
 
@@ -193,7 +278,7 @@ def run(request_path, out_path, cache_path, refresh=False, timeout=75):
         for asset in c["assets"]:
             print("正在获取 " + asset["code"], flush=True)
             try:
-                d, summary, failures = get_market(client, asset, first, last, cal, c["provider"])
+                d, summary, failures = get_market(client, asset, first, last, cal, c["provider"], c)
                 d["in_requested_range"] = d["date"].ge(pd.Timestamp(c["start"]))
                 prices.append(d)
                 quality["market"].append(summary)

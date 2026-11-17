@@ -42,6 +42,10 @@ def weighting_text(c):
 
 def macro_text(c, names):
     if not c.get("enabled"): return "固定大类比例，未启用宏观条件调整"
+    if "regions" in c:
+        labels = {"CN": "中国", "US": "美国"}
+        selected = "、".join(labels.get(key, key) for key, value in c["regions"].items() if value.get("enabled", True))
+        return f"{selected}指标分别判断景气和通胀。在大类区间内先减仓汇入共享现金，再按利好条件加仓。"
     freq = {"weekly":"每周", "monthly":"每月", "quarterly":"每季度"}
     parts = [freq.get(c.get("rebalance", "monthly"), str(c.get("rebalance")))+"检查"]
     for r in c.get("rules", []):
@@ -101,7 +105,14 @@ def rule_rows(run):
                  {"parameter": f"{name}·内部调仓", "value": freq.get(s.get("rebalance"), str(s.get("rebalance", "未提供")))},
                  {"parameter": f"{name}·筛选", "value": selection_text(s.get("selection", {}))},
                  {"parameter": f"{name}·配权", "value": weighting_text(s.get("weighting", {}))}]
-    rows.append({"parameter": "宏观规则", "value": "未启用宏观条件；大类比例采用风险平价" if allocation.get("method") == "risk_parity" else macro_text(c.get("macro", {}), {s["id"]:s.get("name",s["id"]) for s in c.get("sleeves", [])})})
+    names = {s["id"]: s.get("name", s["id"]) for s in c.get("sleeves", [])}
+    rows.append({"parameter": "宏观规则", "value": macro_text(c.get("macro", {}), names)})
+    if c.get("volatility", {}).get("enabled"):
+        clauses = []
+        for spec in c["volatility"]["signals"]:
+            label = "境内波指" if spec.get("switch_to") else "美股 VIX"
+            clauses.append(f"{label}进入点位 {spec['enter']:g}，退出点位 {spec['exit']:g}，均线 {spec['fast']}/{spec['slow']} 日")
+        rows.append({"parameter": "波动率规则", "value": "。".join(clauses)})
     if c.get("benchmark_only"):
         rows.append({"parameter": "基准证券", "value": c["benchmark_only"]["code"]})
     return rows
@@ -191,6 +202,7 @@ def detail(run, selected, curve, metrics, start, end, opening_capital):
         if not picks.empty and "name" in picks:
             ticker_names.update(picks.sort_values("execution_date").dropna(subset=["name"]).set_index("code")["name"].to_dict())
         ticker_names["CASH"] = "现金"
+        ticker_names["RECEIVABLE"] = "待到账赎回款"
         last["name"] = last["code"].map(ticker_names).fillna(last["code"])
         last["sleeve_name"] = last["sleeve"].map(names).fillna(last["sleeve"])
         out["holdings"] = records(last.sort_values("weight", ascending=False))
@@ -218,8 +230,8 @@ def execution_review(run, regimes, start):
         method = "风险平价"
         def fell_back(row):
             return row.get("status") != "success"
-    elif run.config.get("macro", {}).get("enabled"):
-        method = "宏观条件配置"
+    elif run.config.get("macro", {}).get("enabled") or run.config.get("volatility", {}).get("enabled"):
+        method = "宏观条件配置" if run.config.get("macro", {}).get("enabled") else "波动率调整"
         def fell_back(row):
             return row.get("fallback", row.get("state", "").startswith("指标不足，沿用"))
     else:

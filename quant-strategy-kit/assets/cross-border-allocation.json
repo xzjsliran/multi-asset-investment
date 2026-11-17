@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "name": "多资产配置策略（海外ETF权益）",
+  "name": "跨境多资产配置策略",
   "start": "2025-01-01",
   "end": "2025-12-31",
   "base_currency": "CNY",
@@ -14,20 +14,260 @@
     "kind": "etf"
   },
   "macro": {
-    "enabled": false
+    "enabled": false,
+    "regions": {
+      "CN": {
+        "rules": [
+          {
+            "name": "景气偏强且通胀上行",
+            "all": [
+              {
+                "series": "cn_pmi",
+                "op": ">=",
+                "threshold": 50
+              },
+              {
+                "series": "cn_cpi_yoy",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "cn_equity": 0.02,
+              "cn_bonds": -0.03,
+              "gold": 0.01
+            }
+          },
+          {
+            "name": "景气偏强且通胀持平或下行",
+            "all": [
+              {
+                "series": "cn_pmi",
+                "op": ">=",
+                "threshold": 50
+              },
+              {
+                "series": "cn_cpi_yoy",
+                "op": "<=",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "cn_equity": 0.04,
+              "cn_bonds": -0.04
+            }
+          },
+          {
+            "name": "景气偏弱且通胀上行",
+            "all": [
+              {
+                "series": "cn_pmi",
+                "op": "<",
+                "threshold": 50
+              },
+              {
+                "series": "cn_cpi_yoy",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "cn_equity": -0.05,
+              "cn_bonds": -0.025,
+              "gold": 0.04
+            }
+          },
+          {
+            "name": "景气偏弱且通胀持平或下行",
+            "all": [
+              {
+                "series": "cn_pmi",
+                "op": "<",
+                "threshold": 50
+              },
+              {
+                "series": "cn_cpi_yoy",
+                "op": "<=",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "cn_equity": -0.04,
+              "cn_bonds": 0.04
+            }
+          }
+        ],
+        "modifiers": [
+          {
+            "name": "中国操作利率上行",
+            "all": [
+              {
+                "series": "cn_policy_rate",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "cn_bonds": -0.015,
+              "gold": 0.015
+            }
+          },
+          {
+            "name": "中国城镇调查失业率上行",
+            "all": [
+              {
+                "series": "cn_unemployment",
+                "op": ">",
+                "threshold": 0.2,
+                "transform": "change",
+                "periods": 3
+              }
+            ],
+            "changes": {
+              "cn_equity": -0.01
+            }
+          }
+        ]
+      },
+      "US": {
+        "rules": [
+          {
+            "name": "景气偏强且通胀上行",
+            "all": [
+              {
+                "series": "us_unemployment",
+                "op": "<=",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 3
+              },
+              {
+                "series": "us_cpi_yoy",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "us_equity": -0.02,
+              "usd_reserve": 0.02
+            }
+          },
+          {
+            "name": "景气偏强且通胀持平或下行",
+            "all": [
+              {
+                "series": "us_unemployment",
+                "op": "<=",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 3
+              },
+              {
+                "series": "us_cpi_yoy",
+                "op": "<=",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "us_equity": 0.04,
+              "usd_reserve": -0.04
+            }
+          },
+          {
+            "name": "景气偏弱且通胀上行",
+            "all": [
+              {
+                "series": "us_unemployment",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 3
+              },
+              {
+                "series": "us_cpi_yoy",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "us_equity": -0.05,
+              "cn_bonds": 0.025,
+              "gold": 0.025
+            }
+          },
+          {
+            "name": "景气偏弱且通胀持平或下行",
+            "all": [
+              {
+                "series": "us_unemployment",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 3
+              },
+              {
+                "series": "us_cpi_yoy",
+                "op": "<=",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 1
+              }
+            ],
+            "changes": {
+              "us_equity": -0.04,
+              "usd_reserve": 0.04
+            }
+          }
+        ],
+        "modifiers": [
+          {
+            "name": "美联储政策利率近一月上行",
+            "all": [
+              {
+                "series": "fed_upper",
+                "op": ">",
+                "threshold": 0,
+                "transform": "change",
+                "periods": 30
+              }
+            ],
+            "changes": {
+              "us_equity": -0.015,
+              "usd_reserve": 0.015
+            }
+          }
+        ]
+      }
+    }
   },
   "long_gap_policy": "carry_and_flag",
   "sleeves": [
     {
       "id": "bond",
-      "name": "美元短债",
+      "name": "美元活期存款",
       "weight": 0.25,
       "rebalance": "monthly",
       "assets": [
         {
-          "code": "SHY",
-          "name": "1—3年美国国债ETF",
-          "kind": "us_etf"
+          "code": "USD_DEPOSIT",
+          "name": "美元活期存款",
+          "kind": "usd_deposit"
         }
       ],
       "selection": {
@@ -96,14 +336,15 @@
     },
     {
       "id": "overseas_broad",
-      "name": "海外股票宽基（标普500）",
+      "name": "标普500场外QDII",
       "weight": 0.1,
       "rebalance": "monthly",
       "assets": [
         {
-          "code": "SPY",
-          "name": "标普500ETF",
-          "kind": "us_etf"
+          "code": "050025.OF",
+          "name": "博时标普500ETF联接A（人民币）",
+          "kind": "qdii_nav",
+          "redemption_days": 10
         }
       ],
       "selection": {
@@ -115,14 +356,15 @@
     },
     {
       "id": "overseas_growth",
-      "name": "海外股票成长（纳斯达克100）",
+      "name": "纳斯达克100场外QDII",
       "weight": 0.1,
       "rebalance": "monthly",
       "assets": [
         {
-          "code": "QQQ",
-          "name": "纳斯达克100ETF",
-          "kind": "us_etf"
+          "code": "160213.OF",
+          "name": "国泰纳斯达克100指数（QDII）",
+          "kind": "qdii_nav",
+          "redemption_days": 10
         }
       ],
       "selection": {
@@ -138,6 +380,18 @@
       "weight": 0.1,
       "rebalance": "monthly",
       "assets": [],
+      "risk_proxy": [
+        {
+          "code": "510300.SH",
+          "name": "沪深300ETF",
+          "kind": "etf"
+        },
+        {
+          "code": "510500.SH",
+          "name": "中证500ETF",
+          "kind": "etf"
+        }
+      ],
       "selection": {
         "method": "quality_value_dividend",
         "universe": "csi800",
@@ -151,5 +405,39 @@
         "max_weight": 0.08
       }
     }
-  ]
+  ],
+  "volatility": {
+    "enabled": false,
+    "signals": [
+      {
+        "series": "vix",
+        "groups": [
+          "us_equity"
+        ]
+      }
+    ]
+  },
+  "allocation_limits": {
+    "groups": {
+      "cn_equity": [
+        "equity",
+        "stocks"
+      ],
+      "cn_bonds": [
+        "bond_cny"
+      ],
+      "us_equity": [
+        "overseas_broad",
+        "overseas_growth"
+      ],
+      "usd_reserve": [
+        "bond"
+      ],
+      "gold": [
+        "gold"
+      ]
+    },
+    "max_shift": 0.05,
+    "max_cash": 0.25
+  }
 }

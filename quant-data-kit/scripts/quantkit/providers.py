@@ -143,6 +143,31 @@ def market_sina(p):
                 volume_unit="vendor_native_unverified", amount_unit="CNY", **meta)
 
 
+def official_time(soup, text):
+    date_node = soup.find("meta", attrs={"name": re.compile("PubDate|publishdate", re.I)})
+    stamp = date_node.get("content", "") if date_node else ""
+    date_match = re.search(r"20\d{2}[-/]\d{2}[-/]\d{2}(?:\s*\d{2}:\d{2}(?::\d{2})?)?", stamp)
+    if not date_match or len(date_match.group()) == 10:
+        precise = re.search(r"20\d{2}[-/]\d{2}[-/]\d{2}\d{2}:\d{2}(?::\d{2})?", text)
+        if precise and (not date_match or precise.group()[:10].replace("/", "-") == date_match.group().replace("/", "-")):
+            date_match = precise
+    if not date_match:
+        raise ValueError("公告未找到可核对的发布时间。")
+    s = date_match.group().replace("/", "-")
+    if len(s) > 10 and s[10].isdigit():
+        s = s[:10] + " " + s[10:]
+    return pd.Timestamp(s).tz_localize("Asia/Shanghai"), len(s) == 10
+
+
+def official_event(series, period, value, unit, released, date_only, source, url):
+    available = released + pd.Timedelta(days=1) if date_only else released
+    return {"series": series, "period": period, "value": value,
+            "unit": unit, "release_at": released.isoformat(), "available_at": available.isoformat(),
+            "availability_rule": "next_day_if_date_only" if date_only else "published_timestamp",
+            "source": source, "source_url": url, "vintage": "original_release_page",
+            "signal_eligible": True, "pit_verified": True}
+
+
 def nbs_article(html, url):
     """从原公告提取当期值和公布时点，不把当前修订表回填到历史。"""
     if urlparse(url).scheme != "https" or urlparse(url).hostname != "www.stats.gov.cn":
@@ -152,25 +177,17 @@ def nbs_article(html, url):
     title_node = soup.find("meta", attrs={"name": "ArticleTitle"})
     title = title_node.get("content", "") if title_node else (soup.title.get_text() if soup.title else text[:120])
     title = re.sub(r"\s+", "", title)
-    if "解读" in title:
-        raise ValueError("请选择指标发布原文，解读文章不作为原始发布时间。")
-    period = re.search(r"(20\d{2})年(\d{1,2})月", title)
-    if not period:
+    if "解读" in title or "答记者问" in title:
+        raise ValueError("请选择指标发布原文。")
+    released, date_only = official_time(soup, text)
+    stamp = re.search(r"(?:(20\d{2})年)?(?<![\d—－–-])(\d{1,2})月", title)
+    if not stamp:
         raise ValueError("未从公告标题识别统计月份。")
-    date_node = soup.find("meta", attrs={"name": "PubDate"})
-    stamp = date_node.get("content", "") if date_node else ""
-    date_match = re.search(r"20\d{2}[-/]\d{2}[-/]\d{2}(?:\s*\d{2}:\d{2}(?::\d{2})?)?", stamp)
-    if not date_match or len(date_match.group()) == 10:
-        precise = re.search(r"20\d{2}[-/]\d{2}[-/]\d{2}\d{2}:\d{2}(?::\d{2})?", text)
-        date_match = precise or date_match
-    if not date_match:
-        raise ValueError("公告未找到可核对的发布时间。")
-    s = date_match.group().replace("/", "-")
-    if len(s) > 10 and s[10].isdigit():
-        s = s[:10] + " " + s[10:]
-    date_only = len(s) == 10
-    released = pd.Timestamp(s).tz_localize("Asia/Shanghai")
-    available = released + pd.Timedelta(days=1) if date_only else released
+    month = int(stamp[2])
+    year = int(stamp[1]) if stamp[1] else released.year - (month > released.month)
+    if not stamp[1] and not 0 <= (released.year - year) * 12 + released.month - month <= 2:
+        raise ValueError("未注明年份的公告月份与发布日期不匹配。")
+    period = f"{year}-{month:02d}"
     if "采购经理" in title:
         m = re.search(r"(?<!非)制造业采购经理(?:人)?指数[（(]PMI[）)]为?(\d+(?:\.\d+)?)%?", text)
         if not m:
@@ -182,13 +199,32 @@ def nbs_article(html, url):
             raise ValueError("未识别全国 CPI 同比值。")
         series, unit = "cn_cpi_yoy", "percent_yoy"
         value = 0.0 if m.group(1) == "持平" else float(m.group(2)) * (-1 if m.group(1) == "下降" else 1)
+    elif "国民经济运行" in title or "国民经济" in title:
+        m = re.search(rf"(?<![\d—－–-]){month}月份[，,]?(?:全国)?城镇调查失业率为(\d+(?:\.\d+)?)%", text)
+        if not m:
+            raise ValueError("未识别当月全国城镇调查失业率。")
+        series, value, unit = "cn_unemployment", float(m[1]), "percent"
     else:
-        raise ValueError("本版公告解析支持 PMI 和 CPI。")
-    return {"series": series, "period": f"{period[1]}-{int(period[2]):02d}", "value": value,
-            "unit": unit, "release_at": released.isoformat(), "available_at": available.isoformat(),
-            "availability_rule": "next_day_if_date_only" if date_only else "published_timestamp",
-            "source": "nbs_release", "source_url": url, "vintage": "original_release_page",
-            "signal_eligible": True, "pit_verified": True}
+        raise ValueError("公告解析支持 PMI、CPI 和全国城镇调查失业率。")
+    return official_event(series, period, value, unit, released, date_only, "nbs_release", url)
+
+
+def pbc_rate_article(html, url):
+    if urlparse(url).scheme != "https" or urlparse(url).hostname not in {"www.pbc.gov.cn", "pbc.gov.cn"}:
+        raise ValueError("操作利率应提供人民银行公开市场操作原公告。")
+    soup = BeautifulSoup(html, "html.parser")
+    text = re.sub(r"\s+", "", soup.get_text(" ", strip=True)).replace("％", "%")
+    if "公开市场业务交易公告" not in text or "逆回购" not in text:
+        raise ValueError("未识别人民银行逆回购操作公告。")
+    released, date_only = official_time(soup, text)
+    for row in soup.find_all("tr"):
+        cells = [re.sub(r"\s+", "", cell.get_text(strip=True)).replace("％", "%") for cell in row.find_all("td")]
+        if "7天" in cells or "7天期" in cells:
+            rates = [cell for cell in cells if re.fullmatch(r"\d+(?:\.\d+)?%", cell)]
+            if len(rates) == 1:
+                return official_event("cn_policy_rate", str(released.date()), float(rates[0][:-1]),
+                                      "percent", released, date_only, "pbc_omo_release", url)
+    raise ValueError("未识别公告表格的7天期逆回购操作利率。")
 
 
 def nbs_url(p):
@@ -210,7 +246,9 @@ def nbs_index(p):
     urls = []
     for a in soup.find_all("a", href=True):
         title = a.get_text(strip=True)
-        if "解读" not in title and re.search(r"20\d{2}年\d+月", title) and ("采购经理" in title or "居民消费价格" in title):
+        if "解读" not in title and "答记者问" not in title and re.search(r"\d+月", title) and (
+            "采购经理" in title or "居民消费价格" in title or "国民经济运行" in title
+        ):
             target = urljoin(url, a["href"])
             if urlparse(target).hostname == "www.stats.gov.cn":
                 urls.append(target)
@@ -246,6 +284,34 @@ def macro(p):
 
 
 def fetch(op, p):
+    if op == "fund_nav_ts":
+        d = ts_query("fund_nav", ts_code=p["code"], market="O",
+                     start_date=p["start"].replace("-", ""), end_date=p["end"].replace("-", ""),
+                     fields="ts_code,ann_date,nav_date,unit_nav,adj_nav")
+        if len(d) >= 2000:
+            raise ValueError("场外净值响应可能达到条数上限，请缩短请求区间。")
+        return pack(d, source="tushare_fund_nav_O", source_url="https://tushare.pro/document/2?doc_id=119")
+    if op == "boc_usd_rates":
+        from .instruments import BOC_ARCHIVE, bank_rate_history
+        return pack(bank_rate_history(get, p["start"], p["end"]), source="boc_demand_rates", source_url=BOC_ARCHIVE)
+    if op == "usd_cny":
+        url = "https://fred.stlouisfed.org/graph/fredgraph.csv"
+        csv = get(url, {"id": "DEXCHUS", "cosd": p["start"], "coed": p["end"]}).text
+        d = pd.read_csv(io.StringIO(csv)).rename(columns={"observation_date": "date", "DATE": "date", "DEXCHUS": "Close"})
+        return pack(d[["date", "Close"]], source="fred_DEXCHUS",
+                    source_url="https://fred.stlouisfed.org/series/DEXCHUS")
+    if op == "cn_volatility":
+        from .local_volatility import HCVIX_URL, volatility_closes
+        return pack(volatility_closes(get(HCVIX_URL).text), source="hcquant_hcvix", source_url=HCVIX_URL)
+    if op == "pbc_rate_url":
+        url = p["url"]
+        if urlparse(url).scheme != "https" or urlparse(url).hostname not in {"www.pbc.gov.cn", "pbc.gov.cn"}:
+            raise ValueError("公告地址须为人民银行 HTTPS 官网。")
+        return {"event": pbc_rate_article(get(url).content, url)}
+    if op == "fred_realtime":
+        from .vintages import realtime_events
+        d = realtime_events(p["series"], p["start"], p["end"])
+        return pack(d, source="alfred")
     if op == "ts_table":
         # 策略所需的历史财务扩展仍由本地代码请求；认证不进入参数和日志。
         from .fundamentals import paged_query

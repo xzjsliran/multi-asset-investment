@@ -143,40 +143,26 @@ class StrategyRules(unittest.TestCase):
                 self.assertEqual(pd.read_csv(out / (key+'.csv')).columns.tolist(), TABLE_COLUMNS[key])
             self.assertEqual(json.loads((out / 'unfilled_at_end.json').read_text()), [])
 
-    def test_cross_border_preset_budgets_and_qdii_substitutions(self):
-        base_name, qdii_name = "cross-border-allocation", "qdii-equity-allocation"
-        configs = {}
-        for name in (base_name, qdii_name):
-            config = preset(name)
-            with (ROOT / "assets" / f"{name}.json").open(encoding="utf-8") as file:
-                self.assertEqual(json.load(file), config)
-            configs[name] = {s["id"]: s for s in validate(config)["sleeves"]}
-
-        base, qdii = configs[base_name], configs[qdii_name]
+    def test_cross_border_preset_combines_qdii_and_usd_deposit(self):
+        config = preset("cross-border-allocation")
+        with (ROOT / "assets/cross-border-allocation.json").open(encoding="utf-8") as file:
+            self.assertEqual(json.load(file), config)
+        self.assertEqual(preset("qdii-equity-allocation"), config)
+        base = {s["id"]: s for s in validate(config)["sleeves"]}
         self.assertEqual({sid: s["weight"] for sid, s in base.items()}, {
             "bond": .25, "bond_cny": .25, "gold": .10, "equity": .10, "stocks": .10,
             "overseas_broad": .10, "overseas_growth": .10,
         })
-        self.assertEqual(set(qdii), set(base))
-        self.assertIn("成长", base["overseas_growth"]["name"])
         self.assertEqual(base["equity"]["assets"][0]["code"], "510300.SH")
         self.assertNotIn("601899.SH", base["stocks"]["selection"].get("exclude", []))
-        self.assertEqual(base["bond"]["assets"][0]["code"], "SHY")
+        self.assertEqual(base["bond"]["assets"][0]["code"], "USD_DEPOSIT")
         self.assertEqual(base["bond_cny"]["assets"][0]["code"], "511260.SH")
         self.assertEqual(base["stocks"]["selection"]["method"], "quality_value_dividend")
         self.assertEqual(base["stocks"]["selection"]["small_cap_weight"], .10)
         self.assertEqual(base["stocks"]["selection"]["buffer_rank"], 40)
-        for sid in ("bond", "bond_cny", "gold", "equity", "stocks"):
-            self.assertEqual(qdii[sid], base[sid])
-        for sid, (direct, mainland) in {
-            "overseas_broad": ("SPY", "513500.SH"),
-            "overseas_growth": ("QQQ", "513100.SH"),
-        }.items():
-            self.assertEqual(base[sid]["assets"][0]["code"], direct)
-            self.assertEqual(qdii[sid]["assets"][0]["code"], mainland)
-            self.assertEqual(qdii[sid]["assets"][0]["kind"], "etf")
-            self.assertEqual(qdii[sid]["assets"][0]["currency"], "CNY")
-            self.assertEqual(qdii[sid]["weight"], base[sid]["weight"])
+        for sid, code in {"overseas_broad": "050025.OF", "overseas_growth": "160213.OF"}.items():
+            self.assertEqual(base[sid]["assets"][0]["code"], code)
+            self.assertEqual(base[sid]["assets"][0]["kind"], "qdii_nav")
 
     def test_presets_are_monthly_and_allow_explicit_quarterly(self):
         for name in PRESET_NAMES:
@@ -184,7 +170,7 @@ class StrategyRules(unittest.TestCase):
                 config = validate(preset(name))
                 self.assertEqual(config["allocation_rebalance"], "monthly")
                 self.assertTrue(all(s["rebalance"] == "monthly" for s in config["sleeves"]))
-                if config["macro"].get("enabled"):
+                if config["macro"].get("enabled") and "regions" not in config["macro"]:
                     self.assertEqual(config["macro"]["rebalance"], "monthly")
                 config["allocation_rebalance"] = "quarterly"
                 config["sleeves"][0]["rebalance"] = "quarterly"
